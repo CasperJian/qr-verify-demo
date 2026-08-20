@@ -373,7 +373,7 @@ function showPass(avg,T,r){
   $("lockWrap").className="locked open";
   $("prodRows").innerHTML=rec.map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
   $("actionRow").innerHTML=`<button id="btnAgain2" class="ghost">驗證下一張</button>`;
-  $("btnAgain2").onclick=realMode;
+  $("btnAgain2").onclick=()=>realMode(false);
   if(n>1)$("actionRow").insertAdjacentHTML("beforebegin",
     `<div class="warnbox">此序號在本裝置已驗證 ${n} 次。量產版後台會彙整所有裝置紀錄——同一序號多地多次出現時自動標記為疑似複製。</div>`);
 }
@@ -391,7 +391,7 @@ function showFail(avg,T,r,reason){
   $("prodRows").innerHTML=fakeRecord(SERIAL||"XXXXX-XXXXX",TOKEN||"0000000000")
     .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
   $("actionRow").innerHTML=`<button id="btnAgain3">重新拍攝</button><button class="ghost" id="btnReport">回報這張標籤</button>`;
-  $("btnAgain3").onclick=realMode;
+  $("btnAgain3").onclick=()=>realMode(false);
   $("btnReport").onclick=()=>alert("示範：量產版此處會把序號、量測值、時間地點回報到品牌後台，作為仿品流向情報。");
 }
 function showSigFail(serial,token){
@@ -408,7 +408,7 @@ function showSigFail(serial,token){
   $("prodRows").innerHTML=fakeRecord(serial,token||"0000000000")
     .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
   $("actionRow").innerHTML=`<button id="btnAgain4">重新掃描</button>`;
-  $("btnAgain4").onclick=realMode;
+  $("btnAgain4").onclick=()=>realMode(false);
 }
 
 /* ===== 相機（只拍一次）===== */
@@ -549,9 +549,12 @@ function demoSig(){
   demoMode=true;$("demoTag").style.display="";
   showSigFail("7Q3KX-9M2PD","deadbeef00");
 }
-function realMode(){
+// keepSerial=true：沿用掃碼網址帶進來的序號（拍攝時會比對，防止換標）
+// keepSerial=false：清空，接受任何一張標籤（掃描站／驗證下一張）
+function realMode(keepSerial){
   demoMode=false;$("demoTag").style.display="none";
-  SERIAL=null;TOKEN=null;QROBJ=null;PART=null;samples=[];
+  if(!keepSerial){SERIAL=null;TOKEN=null;}
+  QROBJ=null;PART=null;samples=[];
   hideAll();
   $("scanCard").style.display="";
   $("camStatus").textContent="";$("prog").style.display="none";
@@ -560,7 +563,7 @@ function realMode(){
 $("btnDemoPass").onclick=demoPass;
 $("btnDemoFail").onclick=demoFail;
 $("btnDemoSig").onclick=demoSig;
-$("btnReal").onclick=realMode;
+$("btnReal").onclick=()=>realMode(false);
 $("btnCam").onclick=startCam;
 window.addEventListener("pagehide",stopStream);
 
@@ -584,7 +587,7 @@ $("btnCheck").onclick=()=>{
   if(d==="pass"){demoPass();return;}
   if(d==="fail"){demoFail();return;}
   if(d==="sig"){demoSig();return;}
-  realMode();
+  realMode(!!m);   // 有帶序號就沿用，讓拍攝階段做換標比對
 })();
 </script>
 </body>
