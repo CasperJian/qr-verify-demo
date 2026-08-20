@@ -266,8 +266,14 @@ function squareToQuad(p0,p1,p2,p3){
   }
   return (u,v)=>{const w=g*u+h*v+1;return{x:(a*u+b*v+c)/w,y:(d*u+e*v+f)/w};};
 }
-/* ===== 單幀量測 ===== */
-function measureFrame(img,W,H,corners,count,part){
+/* ===== 單幀量測 =====
+   三項設計：
+   ① 明暗分類直接由照片亮度判定，不再重新編碼 QR 還原矩陣
+      → 移除「換 QR 編碼器版本可能選到不同遮罩圖樣」的系統性失效模式
+   ② 功能圖樣（定位／對時／對位）保證是純墨與純紙，其內部離散即為純雜訊
+      → 免費取得每次拍攝的 σ 估計值，可回報訊噪比而非未校準的原始強度
+   ③ 鄰域純度加權：明暗交界處的模塊受墨暈污染最重，依同類鄰居數降權 */
+function measureFrame(img,W,H,corners,count,token){
   const map=squareToQuad(corners.tl,corners.tr,corners.br,corners.bl);
   const mpx=Math.hypot(corners.tr.x-corners.tl.x,corners.tr.y-corners.tl.y)/count;
   const rb=Math.max(1,Math.round(mpx*0.22));
@@ -282,26 +288,72 @@ function measureFrame(img,W,H,corners,count,part){
     }
     return n?rgb2lab(R/n,G/n,B/n):null;
   }
-  // 分格量測：把碼面切成 G×G 格，每格各自算「A 組平均 − B 組平均」。
-  // 格內相減可抵消局部光照與印刷密度梯度；主判定看「符號正確的格數」，
-  // 與訊號強度無關 → 墨量偏淡或光線偏暗殺不掉它。
+  // ── 取樣全部模塊 ──
+  const isFunc=qrFunctionMask(count);
+  const lab=new Array(count*count), Ls=[];
+  for(let r=0;r<count;r++)for(let c=0;c<count;c++){
+    const v=sampleLab(r,c); lab[r*count+c]=v;
+    if(v)Ls.push(v[0]);
+  }
+  if(Ls.length<count)return null;
+  // ── 由亮度分佈定明暗門檻（近黑 L*≈7、近白 L*≈97，差距極大，分類穩健）──
+  const sorted=Ls.slice().sort((a,b)=>a-b);
+  const q=Math.max(1,Math.floor(sorted.length*0.3));
+  const loMean=sorted.slice(0,q).reduce((s,v)=>s+v,0)/q;
+  const hiMean=sorted.slice(-q).reduce((s,v)=>s+v,0)/q;
+  const thr=(loMean+hiMean)/2;
+  const dark=(r,c)=>{const v=lab[r*count+c];return v?v[0]<thr:false;};
+  // ── 功能圖樣 → 雜訊 σ 估計與黑白參考 ──
+  const fD=[],fW=[];
+  for(let r=0;r<count;r++)for(let c=0;c<count;c++){
+    if(!isFunc(r,c))continue;
+    const v=lab[r*count+c]; if(!v)continue;
+    (v[0]<thr?fD:fW).push(v);
+  }
+  const spread=(arr,ax)=>{
+    if(arr.length<4)return null;
+    const m=arr.reduce((s,v)=>s+v[ax],0)/arr.length;
+    return Math.sqrt(arr.reduce((s,v)=>s+(v[ax]-m)*(v[ax]-m),0)/(arr.length-1));
+  };
+  const sigmaD=Math.max(spread(fD,1)||0,spread(fD,2)||0);
+  const sigmaW=Math.max(spread(fW,1)||0,spread(fW,2)||0);
+  const sigma=Math.max(sigmaD,sigmaW,0.01);
+  const refs={darkL:fD.length?fD.reduce((s,v)=>s+v[0],0)/fD.length:null,
+              whiteL:fW.length?fW.reduce((s,v)=>s+v[0],0)/fW.length:null,
+              sigmaDark:sigmaD,sigmaWhite:sigmaW,nFunc:fD.length+fW.length};
+  // ── 分組（由照片分類，非重新編碼 QR）──
+  const part=buildPartition(dark,count,token);
+  // ── 鄰域純度權重：同類鄰居越多越乾淨 ──
+  function purity(r,c){
+    const me=dark(r,c); let opp=0;
+    for(const[dr,dc]of[[-1,0],[1,0],[0,-1],[0,1]]){
+      const rr=r+dr,cc=c+dc;
+      if(rr<0||cc<0||rr>=count||cc>=count)continue;
+      if(dark(rr,cc)!==me)opp++;
+    }
+    return 1/(1+0.6*opp);
+  }
   const cellOf=(r,c)=>Math.min(GRID-1,Math.floor(r*GRID/count))*GRID+Math.min(GRID-1,Math.floor(c*GRID/count));
   const seps=(list,gk,axis)=>{
     const NC=GRID*GRID;
-    const s1=new Float64Array(NC),n1=new Int32Array(NC),s0=new Float64Array(NC),n0=new Int32Array(NC);
+    const s1=new Float64Array(NC),n1=new Float64Array(NC),s0=new Float64Array(NC),n0=new Float64Array(NC);
+    const c1=new Int32Array(NC),c0=new Int32Array(NC);
     let gs1=0,gn1=0,gs0=0,gn0=0;
     for(const md of list){
-      const lab=sampleLab(md.r,md.c); if(!lab)continue;
-      const k=cellOf(md.r,md.c), v=lab[axis];
-      if(md[gk]===1){s1[k]+=v;n1[k]++;gs1+=v;gn1++;}else{s0[k]+=v;n0[k]++;gs0+=v;gn0++;}
+      const v=lab[md.r*count+md.c]; if(!v)continue;
+      const w=purity(md.r,md.c), k=cellOf(md.r,md.c), x=v[axis];
+      if(md[gk]===1){s1[k]+=w*x;n1[k]+=w;c1[k]++;gs1+=w*x;gn1+=w;}
+      else{s0[k]+=w*x;n0[k]+=w;c0[k]++;gs0+=w*x;gn0+=w;}
     }
     const cells=[];
-    for(let k=0;k<NC;k++)cells.push((n1[k]>=MIN_PER_GROUP&&n0[k]>=MIN_PER_GROUP)?(s1[k]/n1[k]-s0[k]/n0[k]):null);
+    for(let k=0;k<NC;k++)cells.push((c1[k]>=MIN_PER_GROUP&&c0[k]>=MIN_PER_GROUP)?(s1[k]/n1[k]-s0[k]/n0[k]):null);
     return{mean:(gn1&&gn0)?(gs1/gn1-gs0/gn0):NaN,cells};
   };
   const dA=seps(part.modules,"g1",1), dB=seps(part.modules,"g2",2);
   const wB=seps(part.wmodules,"g1",2), wA=seps(part.wmodules,"g2",1);
-  return{DA:dA.mean,DB:dB.mean,WB:wB.mean,WA:wA.mean,mpx,
+  return{DA:dA.mean,DB:dB.mean,WB:wB.mean,WA:wA.mean,mpx,sigma,refs,
+         nDark:part.modules.length,nLight:part.wmodules.length,
+         snr:Math.abs(dA.mean)/sigma,
          cells:{DA:dA.cells,DB:dB.cells,WB:wB.cells,WA:wA.cells}};
 }
 /* 符號一致率：四層所有有效格中，符號正確（>0）的比例。
@@ -517,11 +569,9 @@ async function startCam(){
     }else if(parsed.serial!==SERIAL||parsed.token!==TOKEN){
       $("camStatus").textContent="拍到的標籤與本次驗證的序號不符。";return;
     }
-    if(!QROBJ){
-      QROBJ=qrcode(0,"M");QROBJ.addData(code.data);QROBJ.make();
-      COUNT=QROBJ.getModuleCount();
-      if(COUNT!==17+4*code.version){QROBJ=null;return;}
-      PART=buildPartition(QROBJ,COUNT,TOKEN);
+    if(!COUNT){
+      COUNT=17+4*code.version;              // 直接取自 jsQR，不重新編碼 QR
+      if(!(COUNT>=21&&COUNT<=41)){COUNT=null;return;}
     }
     const loc=code.location, k=1/ratio;
     const corners={
@@ -530,7 +580,8 @@ async function startCam(){
       br:{x:loc.bottomRightCorner.x*k,y:loc.bottomRightCorner.y*k},
       bl:{x:loc.bottomLeftCorner.x*k,y:loc.bottomLeftCorner.y*k},
     };
-    const m=measureFrame(fc.getImageData(0,0,full.width,full.height),full.width,full.height,corners,COUNT,PART);
+    const m=measureFrame(fc.getImageData(0,0,full.width,full.height),full.width,full.height,corners,COUNT,TOKEN);
+    if(!m)return;
     if(m.mpx<7){$("camStatus").textContent=`再靠近一點（每模塊 ${m.mpx.toFixed(1)} px，需 ≥7）`;return;}
     if(![m.DA,m.DB,m.WB,m.WA].every(Number.isFinite))return;
     samples.push(m);
@@ -555,6 +606,8 @@ function finishCam(){
   const avg={};
   for(const L of LAYERS)avg[L.k]=samples.reduce((s,m)=>s+m[L.k],0)/samples.length;
   avg.mpx=samples.reduce((s,m)=>s+m.mpx,0)/samples.length;
+  avg.sigma=samples.reduce((s,m)=>s+(m.sigma||0),0)/samples.length;
+  avg.snr=samples.reduce((s,m)=>s+(m.snr||0),0)/samples.length;
   // 分格值也跨幀平均後才判符號，降低單幀雜訊
   avg.cells={};
   for(const L of LAYERS){
@@ -583,7 +636,8 @@ function fillDebug(avg,T,r){
   }).join("");
   const ai=r&&r.agreeInfo;
   const perTxt=ai?LAYERS.map(L=>{const p=ai.per[L.k];return p&&p.rate!=null?`${p.correct}/${p.valid}`:"–";}).join(" "):"–";
-  $("dbgMeta").textContent=`取樣 ${samples.length} 幀 · 每模塊 ${avg&&avg.mpx?avg.mpx.toFixed(1):"–"} px · `
+  const sg=avg&&avg.sigma?avg.sigma.toFixed(2):"–", sn=avg&&avg.snr?avg.snr.toFixed(1):"–";
+  $("dbgMeta").textContent=`取樣 ${samples.length} 幀 · 每模塊 ${avg&&avg.mpx?avg.mpx.toFixed(1):"–"} px · 雜訊σ ${sg}（功能圖樣估得）· 訊噪比 ${sn} · `
     +`符號一致率 ${r&&r.agree!=null?(r.agree*100).toFixed(1)+"%":"–"}（${ai?ai.correct+"/"+ai.valid:"–"} 格，各層 ${perTxt}）`
     +` · 強度達標 ${r?r.passCnt:0}/4 · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`;
 }
@@ -635,7 +689,7 @@ function demoSig(){
 function realMode(useHash,autoStart){
   demoMode=false;$("demoTag").style.display="none";
   if(useHash){SERIAL=HASH_SERIAL;TOKEN=HASH_TOKEN;}else{SERIAL=null;TOKEN=null;}
-  QROBJ=null;PART=null;samples=[];
+  QROBJ=null;PART=null;COUNT=null;samples=[];
   hideAll();
   $("scanCard").style.display="";
   $("camStatus").textContent="";

@@ -18,14 +18,18 @@ function qrFunctionMask(count){
   };
 }
 
-function buildPartition(qr,count,token){
+function buildPartition(src,count,token){
+  // src 可為 QR 物件（生成端）或 isDark(r,c) 函式（驗證端由照片亮度分類）。
+  // 注意：g1/g2 只取決於模塊座標與 RNG 順序，與明暗分類無關；
+  // 因此即使偶有模塊分錯明暗，也只是把該模塊放進另一條層，不會連鎖崩壞。
+  const isDark=(typeof src==="function")?src:((r,c)=>src.isDark(r,c));
   const rng=mulberry32(parseInt(token.slice(0,8),16)>>>0);
   const isFunc=qrFunctionMask(count);
   const modules=[], wmodules=[];
   for(let r=0;r<count;r++)for(let c=0;c<count;c++){
     if(isFunc(r,c))continue;
     const m={r,c,g1:rng()<0.5?0:1,g2:rng()<0.5?0:1};
-    if(qr.isDark(r,c))modules.push(m); else wmodules.push(m);
+    if(isDark(r,c))modules.push(m); else wmodules.push(m);
   }
   return{modules,wmodules};
 }
