@@ -145,14 +145,17 @@
 <!-- 掃描中 -->
 <div class="card" id="scanCard" style="display:none">
   <h3><span class="n">驗證中</span> <span id="scanTitle">請將標籤放進框內</span></h3>
-  <p class="note" id="scanLead">讀取條碼、序號簽章檢查、四條隱碼量測會在<b>同一次拍攝</b>內完成，無須重複對焦。</p>
+  <p class="note" id="scanLead">請將標籤放進框內。</p>
   <div class="videoBox" id="videoBox" style="display:none">
     <video id="vid" playsinline muted></video>
     <div class="guide"><div class="box"></div></div>
   </div>
   <p class="status" id="camStatus"></p>
   <div class="prog" id="prog" style="display:none"></div>
-  <div class="btnrow"><button id="btnCam" style="display:none">啟動相機</button></div>
+  <div class="btnrow">
+    <button id="btnCam" style="display:none">啟動相機</button>
+    <button id="btnShot" class="ghost" style="display:none">停止並以目前取樣判定</button>
+  </div>
   <div class="manual" id="manualBox" style="display:none">
     <p class="note" style="margin-top:8px">或手動輸入標籤上的序號與簽章：</p>
     <input id="inSerial" placeholder="序號（例：7Q3KX-9M2PD）" spellcheck="false" autocomplete="off">
@@ -217,7 +220,7 @@
 </div>
 
 <footer>
-  流程：讀碼 → 序號簽章 → 隱碼量測 → 通過才解鎖資料<br>
+  第 1 步 掃碼進站並驗簽 → 第 2 步 拍攝標籤量測隱碼 → 兩關全過才解鎖資料<br>
   概念驗證示範站 · 產品資料為示範內容 · 判定於前端執行，量產須移至伺服器端
 </footer>
 </div>
@@ -316,6 +319,7 @@ function decide(avg,T){
 /* ===== 狀態 ===== */
 let SERIAL=null,TOKEN=null,PART=null,COUNT=null,QROBJ=null;
 let stream=null,loopTimer=null,samples=[],lastAvg=null,demoMode=false;
+let HASH_SERIAL=null,HASH_TOKEN=null;   // 第一次掃碼帶進來的序號（第二次拍攝時比對用）
 const FRAMES_NEED=3, TIMEOUT_MS=20000, LOOP_MS=120;
 
 /* ===== 畫面繪製 ===== */
@@ -373,7 +377,7 @@ function showPass(avg,T,r){
   $("lockWrap").className="locked open";
   $("prodRows").innerHTML=rec.map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
   $("actionRow").innerHTML=`<button id="btnAgain2" class="ghost">驗證下一張</button>`;
-  $("btnAgain2").onclick=()=>realMode(false);
+  $("btnAgain2").onclick=()=>realMode(false,true);
   if(n>1)$("actionRow").insertAdjacentHTML("beforebegin",
     `<div class="warnbox">此序號在本裝置已驗證 ${n} 次。量產版後台會彙整所有裝置紀錄——同一序號多地多次出現時自動標記為疑似複製。</div>`);
 }
@@ -391,7 +395,7 @@ function showFail(avg,T,r,reason){
   $("prodRows").innerHTML=fakeRecord(SERIAL||"XXXXX-XXXXX",TOKEN||"0000000000")
     .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
   $("actionRow").innerHTML=`<button id="btnAgain3">重新拍攝</button><button class="ghost" id="btnReport">回報這張標籤</button>`;
-  $("btnAgain3").onclick=()=>realMode(false);
+  $("btnAgain3").onclick=()=>realMode(!!HASH_SERIAL,true);
   $("btnReport").onclick=()=>alert("示範：量產版此處會把序號、量測值、時間地點回報到品牌後台，作為仿品流向情報。");
 }
 function showSigFail(serial,token){
@@ -408,7 +412,7 @@ function showSigFail(serial,token){
   $("prodRows").innerHTML=fakeRecord(serial,token||"0000000000")
     .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
   $("actionRow").innerHTML=`<button id="btnAgain4">重新掃描</button>`;
-  $("btnAgain4").onclick=()=>realMode(false);
+  $("btnAgain4").onclick=()=>realMode(false,true);
 }
 
 /* ===== 相機（只拍一次）===== */
@@ -427,6 +431,7 @@ async function startCam(){
   const vid=$("vid");
   vid.srcObject=stream; await vid.play();
   $("videoBox").style.display="";$("btnCam").style.display="none";$("manualBox").style.display="none";
+  $("btnShot").style.display="";
   $("prog").style.display="";
   $("prog").innerHTML=Array.from({length:FRAMES_NEED},()=>"<i></i>").join("");
   samples=[];
@@ -480,6 +485,7 @@ function stopStream(){
   if(loopTimer){clearInterval(loopTimer);loopTimer=null;}
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
   $("videoBox").style.display="none";
+  $("btnShot").style.display="none";
 }
 function finishCam(){
   stopStream();
@@ -548,22 +554,36 @@ function demoSig(){
   demoMode=true;$("demoTag").style.display="";
   showSigFail("7Q3KX-9M2PD","deadbeef00");
 }
-// keepSerial=true：沿用掃碼網址帶進來的序號（拍攝時會比對，防止換標）
-// keepSerial=false：清空，接受任何一張標籤（掃描站／驗證下一張）
-function realMode(keepSerial){
+// useHash=true：沿用第一次掃碼帶進來的序號（第二次拍攝時比對，防止換標）
+// useHash=false：清空，接受任何一張標籤（掃描站／驗證下一張）
+// autoStart=false：只顯示「第 2 步」與按鈕，由使用者按下才開相機
+function realMode(useHash,autoStart){
   demoMode=false;$("demoTag").style.display="none";
-  if(!keepSerial){SERIAL=null;TOKEN=null;}
+  if(useHash){SERIAL=HASH_SERIAL;TOKEN=HASH_TOKEN;}else{SERIAL=null;TOKEN=null;}
   QROBJ=null;PART=null;samples=[];
   hideAll();
   $("scanCard").style.display="";
-  $("camStatus").textContent="";$("prog").style.display="none";
-  startCam();
+  $("camStatus").textContent="";
+  $("prog").style.display="none";
+  $("videoBox").style.display="none";
+  $("btnShot").style.display="none";
+  if(SERIAL){
+    $("scanTitle").textContent="第 2 步：拍攝標籤";
+    $("scanLead").innerHTML=`序號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明序號是原廠簽發的，影印本上的序號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`;
+    $("btnCam").textContent="開啟相機拍攝標籤";
+  }else{
+    $("scanTitle").textContent="請將標籤放進框內";
+    $("scanLead").innerHTML="讀碼、序號簽章檢查、四條隱碼量測會在同一次取景內完成。";
+    $("btnCam").textContent="啟動相機";
+  }
+  if(autoStart)startCam(); else $("btnCam").style.display="";
 }
 $("btnDemoPass").onclick=demoPass;
 $("btnDemoFail").onclick=demoFail;
 $("btnDemoSig").onclick=demoSig;
-$("btnReal").onclick=()=>realMode(false);
+$("btnReal").onclick=()=>realMode(false,true);
 $("btnCam").onclick=startCam;
+$("btnShot").onclick=finishCam;
 window.addEventListener("pagehide",stopStream);
 
 /* ===== 入口 ===== */
@@ -572,7 +592,7 @@ $("btnCheck").onclick=()=>{
   if(!/^[0-9A-Z]{5}-[0-9A-Z]{5}$/.test(s)||!/^[0-9a-f]{10}$/.test(t)){
     alert("格式不對：序號為 5-5 碼英數，簽章為 10 碼十六進位。");return;}
   if(hmacSha256Hex(DEMO_KEY,s).slice(0,10)!==t){showSigFail(s,t);return;}
-  SERIAL=s;TOKEN=t;$("manualBox").style.display="none";startCam();
+  HASH_SERIAL=s;HASH_TOKEN=t;$("manualBox").style.display="none";realMode(true,true);
 };
 (function boot(){
   const q=new URLSearchParams(location.search);
@@ -580,12 +600,14 @@ $("btnCheck").onclick=()=>{
   const m=parseLabelCode(location.hash);
   if(m){
     if(hmacSha256Hex(DEMO_KEY,m.serial).slice(0,10)!==m.token){showSigFail(m.serial,m.token);return;}
-    SERIAL=m.serial;TOKEN=m.token;
+    HASH_SERIAL=m.serial;HASH_TOKEN=m.token;
   }
   if(d==="pass"){demoPass();return;}
   if(d==="fail"){demoFail();return;}
   if(d==="sig"){demoSig();return;}
-  realMode(!!m);   // 有帶序號就沿用，讓拍攝階段做換標比對
+  // 從掃碼進來：停在「第 2 步」等使用者按下才開相機（避免一載入就跳權限詢問）
+  // 直接開頁（掃描站）：相機立即啟動
+  realMode(!!m,!m);
 })();
 </script>
 </body>
