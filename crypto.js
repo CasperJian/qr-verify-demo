@@ -77,5 +77,66 @@ function randSerial(){
   return s;
 }
 
+/* ===== 不透明短碼 =====
+   把「序號(50 bit) + 簽章(40 bit)」重新編碼成 18 個字元的均勻短碼，
+   讓 QR 裡的網址看起來像一般產品碼，不外露 序號.簽章 的結構。
+   這是「不張揚」而非安全機制——安全性仍靠物理隱碼與伺服器端金鑰。 */
+const CODE_BITS = 90;                 // 序號 50 + 簽章 40
+const CODE_STRIDE = 7;                // 與 90 互質 → 位元置換為雙射
+const CODE_MASK = (function(){        // 固定遮罩：打散字元對應，非秘密
+  const h = SHA256(new TextEncoder().encode("qr-stealth-label/code-mask/v1"));
+  let bits = "";
+  for (let i = 0; i < 12; i++) bits += h[i].toString(2).padStart(8, "0");
+  return bits.slice(0, CODE_BITS);
+})();
+function xorMask(bits){               // 自身為反函數
+  let out = "";
+  for (let i = 0; i < CODE_BITS; i++) out += ((bits[i] === "1") !== (CODE_MASK[i] === "1")) ? "1" : "0";
+  return out;
+}
+function packCode(serial, token){
+  const s = serial.replace(/-/g, "");
+  if (s.length !== 10 || !/^[0-9a-f]{10}$/i.test(token)) return null;
+  let bits = "";
+  for (const ch of s) {
+    const v = B32.indexOf(ch);
+    if (v < 0) return null;
+    bits += v.toString(2).padStart(5, "0");
+  }
+  for (const ch of token) bits += parseInt(ch, 16).toString(2).padStart(4, "0");
+  let perm = "";                      // 位元置換 → 一個序號字元擴散到多個輸出字元
+  for (let i = 0; i < CODE_BITS; i++) perm += bits[(i * CODE_STRIDE) % CODE_BITS];
+  const w = xorMask(perm);
+  let out = "";
+  for (let i = 0; i < CODE_BITS; i += 5) out += B32[parseInt(w.slice(i, i + 5), 2)];
+  return out;   // 18 字元
+}
+function unpackCode(code){
+  if (typeof code !== "string" || code.length !== 18) return null;
+  let w = "";
+  for (const ch of code) {
+    const v = B32.indexOf(ch);
+    if (v < 0) return null;
+    w += v.toString(2).padStart(5, "0");
+  }
+  const perm = xorMask(w);
+  const bits = new Array(CODE_BITS);
+  for (let i = 0; i < CODE_BITS; i++) bits[(i * CODE_STRIDE) % CODE_BITS] = perm[i];
+  let s = "";
+  for (let i = 0; i < 50; i += 5) s += B32[parseInt(bits.slice(i, i + 5).join(""), 2)];
+  let t = "";
+  for (let i = 50; i < CODE_BITS; i += 4) t += parseInt(bits.slice(i, i + 4).join(""), 2).toString(16);
+  return { serial: s.slice(0, 5) + "-" + s.slice(5), token: t };
+}
+/* 從 QR 內容／網址片段取出序號與簽章：優先不透明短碼，並相容舊的 序號.簽章 格式 */
+function parseLabelCode(str){
+  if (typeof str !== "string") return null;
+  let m = str.match(/#([0-9A-Z]{18})(?=$|[?&/])/i);
+  if (m) { const u = unpackCode(m[1].toUpperCase()); if (u) return u; }
+  m = str.match(/#([0-9A-Z]{5}-[0-9A-Z]{5})\.([0-9a-f]{10})(?=$|[?&/])/i);
+  if (m) return { serial: m[1].toUpperCase(), token: m[2].toLowerCase() };
+  return null;
+}
+
 /* node 自測支援 */
-if (typeof module !== "undefined") module.exports = { SHA256, hmacSha256Hex };
+if (typeof module !== "undefined") module.exports = { SHA256, hmacSha256Hex, packCode, unpackCode, parseLabelCode };

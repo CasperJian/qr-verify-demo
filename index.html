@@ -444,15 +444,14 @@ async function startCam(){
     const sImg=sc.getImageData(0,0,small.width,small.height);
     const code=jsQR(sImg.data,small.width,small.height,{inversionAttempts:"dontInvert"});
     if(!code){$("camStatus").textContent="對準標籤，放進框內、保持穩定…";return;}
+    const parsed=parseLabelCode(code.data);
+    if(!parsed){$("camStatus").textContent="偵測到條碼，但不是本系統的防偽標籤。";return;}
     if(!SERIAL){
-      const mm=code.data.match(/#([0-9A-Z]{5}-[0-9A-Z]{5})\.([0-9a-f]{10})\b/i);
-      if(!mm){$("camStatus").textContent="偵測到條碼，但不是本系統的防偽標籤。";return;}
-      const s=mm[1].toUpperCase(), t=mm[2].toLowerCase();
-      if(hmacSha256Hex(DEMO_KEY,s).slice(0,10)!==t){stopStream();showSigFail(s,t);return;}
-      SERIAL=s;TOKEN=t;
+      if(hmacSha256Hex(DEMO_KEY,parsed.serial).slice(0,10)!==parsed.token){
+        stopStream();showSigFail(parsed.serial,parsed.token);return;}
+      SERIAL=parsed.serial;TOKEN=parsed.token;
       $("camStatus").textContent="序號有效，正在量測隱碼…";
-    }
-    if(!code.data.includes(`#${SERIAL}.${TOKEN}`)){
+    }else if(parsed.serial!==SERIAL||parsed.token!==TOKEN){
       $("camStatus").textContent="拍到的標籤與本次驗證的序號不符。";return;
     }
     if(!QROBJ){
@@ -578,11 +577,10 @@ $("btnCheck").onclick=()=>{
 (function boot(){
   const q=new URLSearchParams(location.search);
   const d=q.get("demo");
-  const m=location.hash.match(/^#([0-9A-Z]{5}-[0-9A-Z]{5})\.([0-9a-f]{10})$/i);
+  const m=parseLabelCode(location.hash);
   if(m){
-    const s=m[1].toUpperCase(), t=m[2].toLowerCase();
-    if(hmacSha256Hex(DEMO_KEY,s).slice(0,10)!==t){showSigFail(s,t);return;}
-    SERIAL=s;TOKEN=t;
+    if(hmacSha256Hex(DEMO_KEY,m.serial).slice(0,10)!==m.token){showSigFail(m.serial,m.token);return;}
+    SERIAL=m.serial;TOKEN=m.token;
   }
   if(d==="pass"){demoPass();return;}
   if(d==="fail"){demoFail();return;}
