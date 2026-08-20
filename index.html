@@ -282,18 +282,44 @@ function measureFrame(img,W,H,corners,count,part){
     }
     return n?rgb2lab(R/n,G/n,B/n):null;
   }
+  // 分格量測：把碼面切成 G×G 格，每格各自算「A 組平均 − B 組平均」。
+  // 格內相減可抵消局部光照與印刷密度梯度；主判定看「符號正確的格數」，
+  // 與訊號強度無關 → 墨量偏淡或光線偏暗殺不掉它。
+  const cellOf=(r,c)=>Math.min(GRID-1,Math.floor(r*GRID/count))*GRID+Math.min(GRID-1,Math.floor(c*GRID/count));
   const seps=(list,gk,axis)=>{
-    let s1=0,n1=0,s0=0,n0=0;
+    const NC=GRID*GRID;
+    const s1=new Float64Array(NC),n1=new Int32Array(NC),s0=new Float64Array(NC),n0=new Int32Array(NC);
+    let gs1=0,gn1=0,gs0=0,gn0=0;
     for(const md of list){
       const lab=sampleLab(md.r,md.c); if(!lab)continue;
-      if(md[gk]===1){s1+=lab[axis];n1++;}else{s0+=lab[axis];n0++;}
+      const k=cellOf(md.r,md.c), v=lab[axis];
+      if(md[gk]===1){s1[k]+=v;n1[k]++;gs1+=v;gn1++;}else{s0[k]+=v;n0[k]++;gs0+=v;gn0++;}
     }
-    return(n1&&n0)?(s1/n1-s0/n0):NaN;
+    const cells=[];
+    for(let k=0;k<NC;k++)cells.push((n1[k]>=MIN_PER_GROUP&&n0[k]>=MIN_PER_GROUP)?(s1[k]/n1[k]-s0[k]/n0[k]):null);
+    return{mean:(gn1&&gn0)?(gs1/gn1-gs0/gn0):NaN,cells};
   };
-  return{DA:seps(part.modules,"g1",1),DB:seps(part.modules,"g2",2),
-         WB:seps(part.wmodules,"g1",2),WA:seps(part.wmodules,"g2",1),mpx};
+  const dA=seps(part.modules,"g1",1), dB=seps(part.modules,"g2",2);
+  const wB=seps(part.wmodules,"g1",2), wA=seps(part.wmodules,"g2",1);
+  return{DA:dA.mean,DB:dB.mean,WB:wB.mean,WA:wA.mean,mpx,
+         cells:{DA:dA.cells,DB:dB.cells,WB:wB.cells,WA:wA.cells}};
+}
+/* 符號一致率：四層所有有效格中，符號正確（>0）的比例。
+   仿品訊號被抹除後只能亂猜 → 期望值 0.5；正品即使強度衰減大半仍接近 1。 */
+function agreement(m){
+  if(!m||!m.cells)return null;
+  let valid=0,correct=0;const per={};
+  for(const L of LAYERS){
+    const cs=m.cells[L.k]||[];
+    let v=0,c=0;
+    for(const x of cs){if(x==null||!Number.isFinite(x))continue;v++;if(x>0)c++;}
+    per[L.k]={valid:v,correct:c,rate:v?c/v:null};
+    valid+=v;correct+=c;
+  }
+  return valid?{valid,correct,rate:correct/valid,per}:null;
 }
 /* ===== 閘門門檻 ===== */
+const GRID=4, MIN_PER_GROUP=5;            // 4x4 分格，每格每組至少 5 個模塊才採計
 const LAYERS=[
   {k:"DA",name:"隱碼① 深模塊 a*",defT:1.2},
   {k:"DB",name:"隱碼② 深模塊 b*",defT:1.0},
@@ -306,6 +332,14 @@ function loadT(){
     for(const L of LAYERS)if(typeof t[L.k]==="number")o[L.k]=t[L.k];}catch(e){}
   return o;
 }
+const AGREE_PASS=0.85, AGREE_FAIL=0.65, AGREE_STRONG=0.95;
+// 低強度底線：符號雖是主判定，但仍要求訊號有最低可量測強度。
+// 理由①量到 0.1 Lab 級的差值已在真實拍攝雜訊之下，符號不可信；
+// 理由②純看符號會對「高保真翻印」過度寬容（對方只要保留微量正確符號即可），
+// 這道底線把那條路擋回去。實際值須由實印資料校定。
+const MAG_FLOOR=0.3;
+// 52 格全對若靠瞎猜的機率是 2^-52（約 2e-16）→ 一致率極高時本身就是壓倒性證據，
+// 不需要再要求強度達標，否則印刷偏淡的正品會被誤殺（這正是委外印刷的主要風險）。
 function decide(avg,T){
   let signOK=true,passCnt=0;
   for(const L of LAYERS){
@@ -313,7 +347,22 @@ function decide(avg,T){
     if(!(v>0))signOK=false;
     if(v>=T[L.k])passCnt++;
   }
-  return{pass:signOK&&passCnt>=3,signOK,passCnt};
+  const ag=agreement(avg);
+  const rate=ag?ag.rate:null;
+  const mags=LAYERS.map(L=>Math.abs(avg[L.k])).filter(Number.isFinite).sort((a,b)=>a-b);
+  const magMed=mags.length?mags[Math.floor(mags.length/2)]:0;
+  const magOK=magMed>=MAG_FLOOR;
+  // 主判定＝符號一致率（不受強度變異影響）；強度只能把 PASS 降級為 HOLD，不能單獨造成 PASS
+  let pass,cls;
+  if(rate!=null){
+    if(rate<=AGREE_FAIL){pass=false;cls="fail";}
+    else if(rate>=AGREE_STRONG&&magOK){pass=true;cls="pass";}   // 符號證據壓倒性且過底線
+    else if(rate>=AGREE_PASS&&passCnt>=3){pass=true;cls="pass";} // 中段才需要強度佐證
+    else{pass=false;cls="hold";}
+  }else{                                   // 無分格資料時退回舊規則
+    pass=signOK&&passCnt>=3;cls=pass?"pass":(passCnt===0?"fail":"hold");
+  }
+  return{pass,cls,signOK,passCnt,agree:rate,agreeInfo:ag,magMed,magOK};
 }
 
 /* ===== 狀態 ===== */
@@ -346,7 +395,16 @@ function fakeRecord(serial,token){
 function drawLayers(avg,T,r,ok){
   $("layerCard").style.display="";
   $("layerTitle").textContent=ok?"四條隱碼訊號皆足夠":"隱碼訊號微弱或消失";
-  $("layerRows").innerHTML=LAYERS.map(L=>{
+  // 主指標：符號一致率（與訊號強度無關，強度被印刷變異壓掉一半也不影響）
+  const rate=r&&r.agree!=null?r.agree:null;
+  const agBar=rate==null?"":`<div class="lrow" style="margin-bottom:4px">
+      <span class="nm"><b>符號一致率</b>（主判定）</span>
+      <span class="vl ${rate>=AGREE_PASS?'lyOK':(rate<=AGREE_FAIL?'lyNG':'')}">${(rate*100).toFixed(0)}%</span>
+      <span class="lbar ${rate>=AGREE_PASS?'':'no'}"><i style="width:${Math.round(rate*100)}%"></i>
+        <span class="th" style="left:${AGREE_FAIL*100}%"></span><span class="th" style="left:${AGREE_PASS*100}%"></span></span>
+      <span class="nm" style="grid-column:1/-1;font-size:.72rem">${r.agreeInfo?r.agreeInfo.correct+"/"+r.agreeInfo.valid+" 格符號正確":""}　·　仿品期望值 50%　·　≥${AGREE_PASS*100}% 合格</span>
+    </div>`;
+  $("layerRows").innerHTML=agBar+LAYERS.map(L=>{
     const v=avg?avg[L.k]:0, th=T[L.k];
     const good=v>0&&v>=th;
     const pct=Math.max(0,Math.min(100,(v/(th*2.5))*100));
@@ -359,7 +417,7 @@ function drawLayers(avg,T,r,ok){
   }).join("");
   $("layerFoot").innerHTML=ok
     ?`四條隱碼的統計訊號方向正確、強度高於門檻（豎線）——這是<b>原廠實體印刷品</b>。`
-    :`影印、掃描重印、翻拍都會把近黑歸一成純黑、近白漂成純白，隱碼因此消失。目前 ${r?r.passCnt:0}/4 層達標${r&&!r.signOK?"、且有訊號方向錯誤":""}。`;
+    :`影印、掃描重印、翻拍都會把近黑歸一成純黑、近白漂成純白，隱碼因此消失。符號一致率 ${r&&r.agree!=null?Math.round(r.agree*100)+"%":"–"}（正品應近 100%，訊號被抹除後只能亂猜，期望值 50%）、${r?r.passCnt:0}/4 層強度達標。`;
 }
 function showPass(avg,T,r){
   hideAll();
@@ -497,6 +555,16 @@ function finishCam(){
   const avg={};
   for(const L of LAYERS)avg[L.k]=samples.reduce((s,m)=>s+m[L.k],0)/samples.length;
   avg.mpx=samples.reduce((s,m)=>s+m.mpx,0)/samples.length;
+  // 分格值也跨幀平均後才判符號，降低單幀雜訊
+  avg.cells={};
+  for(const L of LAYERS){
+    const NC=GRID*GRID, acc=new Float64Array(NC), cnt=new Int32Array(NC);
+    for(const m of samples){
+      const cs=m.cells&&m.cells[L.k]; if(!cs)continue;
+      for(let k=0;k<NC;k++){const v=cs[k];if(v!=null&&Number.isFinite(v)){acc[k]+=v;cnt[k]++;}}
+    }
+    avg.cells[L.k]=Array.from({length:NC},(_,k)=>cnt[k]?acc[k]/cnt[k]:null);
+  }
   lastAvg=avg;
   const r=decide(avg,T);
   fillDebug(avg,T,r);
@@ -513,7 +581,11 @@ function fillDebug(avg,T,r){
       <td><input data-k="${L.k}" value="${T[L.k]}"></td>
       <td class="${ok?'lyOK':'lyNG'}">${ok?"過":"未過"}</td></tr>`;
   }).join("");
-  $("dbgMeta").textContent=`取樣 ${samples.length} 幀 · 平均每模塊 ${avg&&avg.mpx?avg.mpx.toFixed(1):"–"} px · 方向全對：${r?(r.signOK?"是":"否"):"–"} · 過門檻層數：${r?r.passCnt:0}/4`;
+  const ai=r&&r.agreeInfo;
+  const perTxt=ai?LAYERS.map(L=>{const p=ai.per[L.k];return p&&p.rate!=null?`${p.correct}/${p.valid}`:"–";}).join(" "):"–";
+  $("dbgMeta").textContent=`取樣 ${samples.length} 幀 · 每模塊 ${avg&&avg.mpx?avg.mpx.toFixed(1):"–"} px · `
+    +`符號一致率 ${r&&r.agree!=null?(r.agree*100).toFixed(1)+"%":"–"}（${ai?ai.correct+"/"+ai.valid:"–"} 格，各層 ${perTxt}）`
+    +` · 強度達標 ${r?r.passCnt:0}/4 · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`;
 }
 $("btnReeval").onclick=()=>{
   if(!lastAvg)return;
@@ -535,7 +607,8 @@ function demoPass(){
   const[s,t]=demoSerial();SERIAL=s;TOKEN=t;
   const T=loadT();
   // 示範用的「正品」量測值：以設計幅度扣掉一般手機拍攝的損耗
-  const avg={DA:6.8,DB:5.3,WB:4.9,WA:4.0,mpx:11.4};
+  const avg={DA:6.8,DB:5.3,WB:4.9,WA:4.0,mpx:11.4,cells:{}};
+  for(const L of LAYERS)avg.cells[L.k]=Array.from({length:GRID*GRID},()=>avg[L.k]*(0.8+0.4*0.5));
   samples=[avg];lastAvg=avg;
   const r=decide(avg,T);fillDebug(avg,T,r);
   showPass(avg,T,r);
@@ -545,7 +618,9 @@ function demoFail(){
   const[s,t]=demoSerial();SERIAL=s;TOKEN=t;
   const T=loadT();
   // 示範用的「影印仿品」量測值：暗層被黑色生成與背景抑制抹掉
-  const avg={DA:0.9,DB:0.5,WB:0.4,WA:-0.2,mpx:11.1};
+  const avg={DA:0.9,DB:0.5,WB:0.4,WA:-0.2,mpx:11.1,cells:{}};
+  let sd=12345;const rnd=()=>{sd=(sd*1103515245+12345)>>>0;return sd/4294967296;};
+  for(const L of LAYERS)avg.cells[L.k]=Array.from({length:GRID*GRID},()=>(rnd()<0.5?-1:1)*0.6);
   samples=[avg];lastAvg=avg;
   const r=decide(avg,T);fillDebug(avg,T,r);
   showFail(avg,T,r,null);
