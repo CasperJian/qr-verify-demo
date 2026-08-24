@@ -303,11 +303,20 @@ function measureFrame(img,W,H,corners,count,token){
   const hiMean=sorted.slice(-q).reduce((s,v)=>s+v,0)/q;
   const thr=(loMean+hiMean)/2;
   const dark=(r,c)=>{const v=lab[r*count+c];return v?v[0]<thr:false;};
+  // 有效模塊判定：本設計的模塊只會落在近黑或近白兩群；
+  // 亮度離群者不是我們的模塊 —— 中央客製圖、反光、髒污、刮傷皆自動排除。
+  const band=Math.max(6,(hiMean-loMean)*0.35);
+  const valid=(r,c)=>{
+    const v=lab[r*count+c]; if(!v)return false;
+    return Math.abs(v[0]-loMean)<band || Math.abs(v[0]-hiMean)<band;
+  };
   // ── 功能圖樣 → 雜訊 σ 估計與黑白參考 ──
   const fD=[],fW=[];
   for(let r=0;r<count;r++)for(let c=0;c<count;c++){
     if(!isFunc(r,c))continue;
     const v=lab[r*count+c]; if(!v)continue;
+    if(Math.abs(v[0]-loMean)>=Math.max(6,(hiMean-loMean)*0.35)&&
+       Math.abs(v[0]-hiMean)>=Math.max(6,(hiMean-loMean)*0.35))continue;
     (v[0]<thr?fD:fW).push(v);
   }
   const spread=(arr,ax)=>{
@@ -341,6 +350,7 @@ function measureFrame(img,W,H,corners,count,token){
     let gs1=0,gn1=0,gs0=0,gn0=0;
     for(const md of list){
       const v=lab[md.r*count+md.c]; if(!v)continue;
+      if(!valid(md.r,md.c))continue;          // 略過圖形／污損區，但 RNG 順序不受影響
       const w=purity(md.r,md.c), k=cellOf(md.r,md.c), x=v[axis];
       if(md[gk]===1){s1[k]+=w*x;n1[k]+=w;c1[k]++;gs1+=w*x;gn1+=w;}
       else{s0[k]+=w*x;n0[k]+=w;c0[k]++;gs0+=w*x;gn0+=w;}
@@ -351,7 +361,9 @@ function measureFrame(img,W,H,corners,count,token){
   };
   const dA=seps(part.modules,"g1",1), dB=seps(part.modules,"g2",2);
   const wB=seps(part.wmodules,"g1",2), wA=seps(part.wmodules,"g2",1);
-  return{DA:dA.mean,DB:dB.mean,WB:wB.mean,WA:wA.mean,mpx,sigma,refs,
+  let nEx=0;
+  for(const md of part.modules.concat(part.wmodules))if(!valid(md.r,md.c))nEx++;
+  return{DA:dA.mean,DB:dB.mean,WB:wB.mean,WA:wA.mean,mpx,sigma,refs,excluded:nEx,
          nDark:part.modules.length,nLight:part.wmodules.length,
          snr:Math.abs(dA.mean)/sigma,
          cells:{DA:dA.cells,DB:dB.cells,WB:wB.cells,WA:wA.cells}};
