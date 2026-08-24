@@ -306,8 +306,12 @@ function measureFrame(img,W,H,corners,count,token){
   // 有效模塊判定：本設計的模塊只會落在近黑或近白兩群；
   // 亮度離群者不是我們的模塊 —— 中央客製圖、反光、髒污、刮傷皆自動排除。
   const band=Math.max(6,(hiMean-loMean)*0.35);
+  // 色度上限：本設計的模塊在色度上近乎中性（隱碼幅度合成後最大約 4.5），
+  // 加上印刷與拍攝雜訊仍遠低於 MAX_CHROMA；彩色圖案／彩色污損則明顯超出。
+  // 僅靠亮度不足以排除高亮度的彩色圖（例如金色），故兩條件並用。
   const valid=(r,c)=>{
     const v=lab[r*count+c]; if(!v)return false;
+    if(Math.hypot(v[1],v[2])>MAX_CHROMA)return false;
     return Math.abs(v[0]-loMean)<band || Math.abs(v[0]-hiMean)<band;
   };
   // ── 功能圖樣 → 雜訊 σ 估計與黑白參考 ──
@@ -383,7 +387,7 @@ function agreement(m){
   return valid?{valid,correct,rate:correct/valid,per}:null;
 }
 /* ===== 閘門門檻 ===== */
-const GRID=4, MIN_PER_GROUP=5;            // 4x4 分格，每格每組至少 5 個模塊才採計
+const GRID=4, MIN_PER_GROUP=5, MAX_CHROMA=14;   // 4x4 分格；每格每組至少 5 個模塊；色度超過 14 視為非我方模塊
 const LAYERS=[
   {k:"DA",name:"隱碼① 深模塊 a*",defT:1.2},
   {k:"DB",name:"隱碼② 深模塊 b*",defT:1.0},
