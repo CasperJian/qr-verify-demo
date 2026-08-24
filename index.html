@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>真品驗證</title>
+<title>紫南宮 開運物驗證</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+TC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <style>
   :root{
@@ -22,6 +22,11 @@
     font-size:16px; line-height:1.7;
   }
   .wrap{width:min(520px,100%); margin:0 auto; padding:0 14px 40px;}
+
+  /* 示範聲明橫幅 */
+  .disclaim{background:var(--warn-bg); border:1px solid var(--warn); border-radius:8px;
+    padding:9px 13px; margin:12px 0 4px; font-size:.79rem; color:var(--ink); line-height:1.6;}
+  .disclaim b{color:var(--warn);}
 
   /* 品牌列 */
   .brand{display:flex; align-items:center; gap:11px; padding:18px 2px 14px;}
@@ -56,7 +61,7 @@
   .lbar.no i{background:var(--fail);}
   .lbar .th{position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--ink); opacity:.35;}
 
-  /* 產品資料（未通過時鎖住）*/
+  /* 登錄資料（未通過時鎖住）*/
   .locked{position:relative;}
   .locked .veil{
     position:absolute; inset:0; z-index:2; border-radius:8px;
@@ -136,10 +141,16 @@
     <line x1="0" y1="17" x2="34" y2="17" stroke="#21242a" stroke-width="2"/>
   </svg>
   <div>
-    <h1>真品驗證</h1>
-    <p>示範品牌 · 隱碼防偽系統</p>
+    <h1>紫南宮 開運物驗證</h1>
+    <p>錢母 · 金雞 · 平安符 隱碼防偽</p>
   </div>
   <span class="demoTag" id="demoTag" style="display:none">示範模式</span>
+</div>
+
+<div class="disclaim">
+  <b>技術示範頁，非紫南宮官方服務。</b>
+  本頁為防偽技術的概念展示，頁面上的品項、編號、日期等皆為<b>示範資料</b>，不代表任何實際發放紀錄。
+  開運物真偽請以廟方服務台為準。
 </div>
 
 <!-- 掃描中 -->
@@ -174,20 +185,20 @@
   <p class="note" id="layerFoot" style="margin-top:11px"></p>
 </div>
 
-<!-- 產品資料（依驗證結果鎖／解）-->
+<!-- 登錄資料（依驗證結果鎖／解）-->
 <div class="card" id="dataCard" style="display:none">
-  <h3><span class="n">資料</span> 產品身分與權益</h3>
+  <h3><span class="n">資料</span> 開運物登錄與權益</h3>
   <div class="locked" id="lockWrap">
     <div class="veil" id="veil">
-      <b>🔒 產品資料未解鎖</b>
+      <b>🔒 登錄資料未解鎖</b>
       <span>需通過隱碼驗證才會顯示<br>（此區內容由伺服器在驗證通過後才發送）</span>
     </div>
     <div class="inner">
       <div class="prod" id="prodRows"></div>
       <div class="perks">
-        <div class="perk"><span class="e">🛡️</span><div><b>保固啟用</b><small>真品保固 24 個月，掃碼即完成註冊</small></div></div>
-        <div class="perk"><span class="e">🎁</span><div><b>會員點數 ＋120</b><small>單一序號限領一次</small></div></div>
-        <div class="perk"><span class="e">🎬</span><div><b>限定內容</b><small>產地紀錄片與職人專訪</small></div></div>
+        <div class="perk"><span class="e">📜</span><div><b>電子開光證明</b><small>可查詢開光場次與登錄資料</small></div></div>
+        <div class="perk"><span class="e">🙏</span><div><b>祈福登錄</b><small>綁定此編號，記錄祈福與還金進度</small></div></div>
+        <div class="perk"><span class="e">🐓</span><div><b>生肖收藏紀錄</b><small>歷年錢母與金雞的個人收藏清單</small></div></div>
       </div>
     </div>
   </div>
@@ -221,7 +232,7 @@
 
 <footer>
   第 1 步 掃碼進站並驗簽 → 第 2 步 拍攝標籤量測隱碼 → 兩關全過才解鎖資料<br>
-  概念驗證示範站 · 產品資料為示範內容 · 判定於前端執行，量產須移至伺服器端
+  技術示範頁 · 非紫南宮官方服務 · 資料為示範內容 · 判定於前端執行，量產須移至伺服器端
 </footer>
 </div>
 
@@ -447,17 +458,18 @@ function hideAll(){
   $("scanCard").style.display="none";
 }
 function fakeRecord(serial,token){
-  // 示範用產品資料，由序號決定性推導（非真實紀錄）
+  // 示範用資料，由序號決定性推導 —— 非真實發放紀錄
   const n=parseInt(token.slice(0,6),16);
   const mo=(n%12)+1, dy=(n>>4)%28+1;
-  const lines=["A","B","C"][n%3];
+  const item=["開運錢母（丙午年紀念版）","開運金雞","平安符（隨身版）"][n%3];
+  const batch=["甲","乙","丙"][n%3];
   return[
-    ["品項","示範品牌 高山烏龍茶 150g"],
-    ["批號","TW-"+token.slice(0,4).toUpperCase()+"-"+lines,1],
-    ["序號",serial,1],
-    ["製造日","2026-"+String(mo).padStart(2,"0")+"-"+String(dy).padStart(2,"0")],
-    ["產地","南投 · 示範茶園"],
-    ["保固至","2028-"+String(mo).padStart(2,"0")+"-"+String(dy).padStart(2,"0")],
+    ["品項",item],
+    ["發放年度","2026 丙午年"],
+    ["開光日期","2026-"+String(mo).padStart(2,"0")+"-"+String(dy).padStart(2,"0")],
+    ["登錄編號","ZN-"+token.slice(0,4).toUpperCase()+"-"+batch,1],
+    ["標籤編號",serial,1],
+    ["發放處","南投 · 紫南宮（示範）"],
   ];
 }
 function drawLayers(avg,T,r,ok){
@@ -484,7 +496,7 @@ function drawLayers(avg,T,r,ok){
     </div>`;
   }).join("");
   $("layerFoot").innerHTML=ok
-    ?`四條隱碼的統計訊號方向正確、強度高於門檻（豎線）——這是<b>原廠實體印刷品</b>。`
+    ?`四條隱碼的統計訊號方向正確、強度高於門檻（豎線）——這是<b>廟方發放的實體印刷標籤</b>。`
     :`影印、掃描重印、翻拍都會把近黑歸一成純黑、近白漂成純白，隱碼因此消失。符號一致率 ${r&&r.agree!=null?Math.round(r.agree*100)+"%":"–"}（正品應近 100%，訊號被抹除後只能亂猜，期望值 50%）、${r?r.passCnt:0}/4 層強度達標。`;
 }
 function showPass(avg,T,r){
@@ -494,9 +506,9 @@ function showPass(avg,T,r){
   try{n=(parseInt(localStorage.getItem("scan_"+SERIAL)||"0",10)||0)+1;localStorage.setItem("scan_"+SERIAL,String(n));}catch(e){}
   $("banner").innerHTML=`<div class="banner ok">
     <span class="icon">✅</span>
-    <h2>原廠真品</h2>
-    <p>序號簽章與四條隱碼全部通過，這張標籤是原廠實體印刷品。</p>
-    <p class="sn">序號 ${SERIAL} · 第 ${n} 次驗證${demoMode?" · 示範資料":""}</p>
+    <h2>確認為廟方正品</h2>
+    <p>編號簽章與四條隱碼全部通過，這張標籤是廟方發放的正品標籤，非坊間仿製。</p>
+    <p class="sn">編號 ${SERIAL} · 第 ${n} 次驗證${demoMode?" · 示範資料":""}</p>
   </div>`;
   drawLayers(avg,T,r,true);
   $("dataCard").style.display="";
@@ -505,15 +517,15 @@ function showPass(avg,T,r){
   $("actionRow").innerHTML=`<button id="btnAgain2" class="ghost">驗證下一張</button>`;
   $("btnAgain2").onclick=()=>realMode(false,true);
   if(n>1)$("actionRow").insertAdjacentHTML("beforebegin",
-    `<div class="warnbox">此序號在本裝置已驗證 ${n} 次。量產版後台會彙整所有裝置紀錄——同一序號多地多次出現時自動標記為疑似複製。</div>`);
+    `<div class="warnbox">此編號在本裝置已驗證 ${n} 次。量產版後台會彙整所有裝置紀錄——同一編號多地多次出現時自動標記為疑似複製。</div>`);
 }
 function showFail(avg,T,r,reason){
   hideAll();
   $("banner").innerHTML=`<div class="banner no">
     <span class="icon">⛔</span>
-    <h2>無法確認為真品</h2>
-    <p>${reason||"標籤上量不到應有的隱碼訊號，此標籤<b>疑似影印或翻拍的複製品</b>。"}</p>
-    <p class="sn">${SERIAL?"序號 "+SERIAL:"未取得序號"}${demoMode?" · 示範資料":""}</p>
+    <h2>無法確認為廟方正品</h2>
+    <p>${reason||"標籤上量不到應有的隱碼訊號，此標籤<b>疑似影印或翻拍的複製品</b>。建議持實物至廟方服務台查詢。"}</p>
+    <p class="sn">${SERIAL?"編號 "+SERIAL:"未取得編號"}${demoMode?" · 示範資料":""}</p>
   </div>`;
   if(avg)drawLayers(avg,T,r,false);
   $("dataCard").style.display="";
@@ -522,16 +534,16 @@ function showFail(avg,T,r,reason){
     .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
   $("actionRow").innerHTML=`<button id="btnAgain3">重新拍攝</button><button class="ghost" id="btnReport">回報這張標籤</button>`;
   $("btnAgain3").onclick=()=>realMode(!!HASH_SERIAL,true);
-  $("btnReport").onclick=()=>alert("示範：量產版此處會把序號、量測值、時間地點回報到品牌後台，作為仿品流向情報。");
+  $("btnReport").onclick=()=>alert("示範：量產版此處會把編號、量測值、時間地點回報到廟方後台，作為仿品流向情報。");
 }
 function showSigFail(serial,token){
   hideAll();
   SERIAL=serial;TOKEN=token;
   $("banner").innerHTML=`<div class="banner no">
     <span class="icon">⚠️</span>
-    <h2>序號無效</h2>
-    <p>簽章與序號不匹配——這個序號<b>不是原廠金鑰簽發的</b>，屬於憑空編造。驗證到此停止，不進行隱碼量測。</p>
-    <p class="sn">序號 ${serial} · 簽章 ${token} ✗${demoMode?" · 示範資料":""}</p>
+    <h2>編號無效</h2>
+    <p>簽章與編號不匹配——這個編號<b>不是廟方系統簽發的</b>，屬於憑空編造。驗證到此停止，不進行隱碼量測。</p>
+    <p class="sn">編號 ${serial} · 簽章 ${token} ✗${demoMode?" · 示範資料":""}</p>
   </div>`;
   $("dataCard").style.display="";
   $("lockWrap").className="locked";
@@ -581,9 +593,9 @@ async function startCam(){
       if(hmacSha256Hex(DEMO_KEY,parsed.serial).slice(0,10)!==parsed.token){
         stopStream();showSigFail(parsed.serial,parsed.token);return;}
       SERIAL=parsed.serial;TOKEN=parsed.token;
-      $("camStatus").textContent="序號有效，正在量測隱碼…";
+      $("camStatus").textContent="編號有效，正在量測隱碼…";
     }else if(parsed.serial!==SERIAL||parsed.token!==TOKEN){
-      $("camStatus").textContent="拍到的標籤與本次驗證的序號不符。";return;
+      $("camStatus").textContent="拍到的標籤與本次驗證的編號不符。";return;
     }
     if(!COUNT){
       COUNT=17+4*code.version;              // 直接取自 jsQR，不重新編碼 QR
@@ -714,7 +726,7 @@ function realMode(useHash,autoStart){
   $("btnShot").style.display="none";
   if(SERIAL){
     $("scanTitle").textContent="第 2 步：拍攝標籤";
-    $("scanLead").innerHTML=`序號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明序號是原廠簽發的，影印本上的序號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`;
+    $("scanLead").innerHTML=`編號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明編號是廟方系統簽發的，影印本上的編號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`;
     $("btnCam").textContent="開啟相機拍攝標籤";
   }else{
     $("scanTitle").textContent="請將標籤放進框內";
