@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>紫南宮 開運物驗證</title>
+<title>開運物真品驗證</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+TC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <style>
   :root{
@@ -141,16 +141,16 @@
     <line x1="0" y1="17" x2="34" y2="17" stroke="#21242a" stroke-width="2"/>
   </svg>
   <div>
-    <h1>紫南宮 開運物驗證</h1>
-    <p>錢母 · 金雞 · 平安符 隱碼防偽</p>
+    <h1>開運物真品驗證</h1>
+    <p>錢母 · 金雞 · 平安符 隱碼防偽（示範）</p>
   </div>
   <span class="demoTag" id="demoTag" style="display:none">示範模式</span>
 </div>
 
 <div class="disclaim">
-  <b>技術示範頁，非紫南宮官方服務。</b>
-  本頁為防偽技術的概念展示，頁面上的品項、編號、日期等皆為<b>示範資料</b>，不代表任何實際發放紀錄。
-  開運物真偽請以廟方服務台為準。
+  <b>技術示範頁。</b>
+  本頁為防偽技術的概念展示，頁面上的宮廟、品項、編號、日期等皆為<b>虛構的示範資料</b>，
+  不對應任何實際宮廟或發放紀錄。實際開運物真偽請以發放單位為準。
 </div>
 
 <!-- 掃描中 -->
@@ -232,7 +232,7 @@
 
 <footer>
   第 1 步 掃碼進站並驗簽 → 第 2 步 拍攝標籤量測隱碼 → 兩關全過才解鎖資料<br>
-  技術示範頁 · 非紫南宮官方服務 · 資料為示範內容 · 判定於前端執行，量產須移至伺服器端
+  技術示範頁 · 宮廟與資料均為虛構示範 · 判定於前端執行，量產須移至伺服器端
 </footer>
 </div>
 
@@ -469,7 +469,7 @@ function fakeRecord(serial,token){
     ["開光日期","2026-"+String(mo).padStart(2,"0")+"-"+String(dy).padStart(2,"0")],
     ["登錄編號","ZN-"+token.slice(0,4).toUpperCase()+"-"+batch,1],
     ["標籤編號",serial,1],
-    ["發放處","南投 · 紫南宮（示範）"],
+    ["發放處","示範宮廟（虛構）"],
   ];
 }
 function drawLayers(avg,T,r,ok){
