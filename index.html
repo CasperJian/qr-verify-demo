@@ -147,6 +147,10 @@
   <span class="demoTag" id="demoTag" style="display:none">示範模式</span>
 </div>
 
+<div id="comboTag" style="display:none;border:2px solid #b3261e;border-radius:6px;
+     padding:11px 13px;margin:0 0 14px;background:#fdecea;color:#5f1512;font-size:.86rem;line-height:1.6">
+</div>
+
 <div class="disclaim">
   <b>技術示範頁。</b>
   本頁為防偽技術的概念展示，頁面上的宮廟、品項、編號、日期等皆為<b>虛構的示範資料</b>，
@@ -222,7 +226,14 @@
         <tbody id="dbgRows"><tr><td colspan="5" class="note">尚無量測資料。</td></tr></tbody>
       </table>
       <p class="note" id="dbgMeta" style="margin-top:8px"></p>
-      <p class="note">通過規則：四層方向全部正確，且至少 3 層分離量 ≥ 門檻。門檻請用「實印正品 vs 自製仿品」實測校定（存於本機瀏覽器）。</p>
+      <p class="note">通過規則：納入判定的層方向全部正確，且僅允許一層分離量未達門檻。門檻請用「實印正品 vs 自製仿品」實測校定（存於本機瀏覽器）。</p>
+      <p class="note" style="margin-top:10px"><b>實驗用：只判定選定的層。</b>標籤若刻意只帶部分隱碼層，未帶碼的層在這裡只能亂猜，會把總判定拖成 HOLD／FAIL。做層組合實印實驗時，把該張沒帶碼的層取消勾選，判定就只看實際帶碼的層。<b>正式驗證必須保持四層全勾</b>（預設值）。</p>
+      <div class="btnrow" id="evalMaskBox" style="gap:14px">
+        <label><input type="checkbox" data-k="DA" checked> ①深 a*</label>
+        <label><input type="checkbox" data-k="DB" checked> ②深 b*</label>
+        <label><input type="checkbox" data-k="WB" checked> ③淺 b*</label>
+        <label><input type="checkbox" data-k="WA" checked> ④淺 a*</label>
+      </div>
       <div class="btnrow">
         <button class="ghost" id="btnReeval">用新門檻重新判定</button>
       </div>
@@ -388,7 +399,7 @@ function measureFrame(img,W,H,corners,count,token){
 function agreement(m){
   if(!m||!m.cells)return null;
   let valid=0,correct=0;const per={};
-  for(const L of LAYERS){
+  for(const L of activeLayers()){
     const cs=m.cells[L.k]||[];
     let v=0,c=0;
     for(const x of cs){if(x==null||!Number.isFinite(x))continue;v++;if(x>0)c++;}
@@ -405,6 +416,15 @@ const LAYERS=[
   {k:"WB",name:"隱碼③ 淺模塊 b*",defT:0.8},
   {k:"WA",name:"隱碼④ 淺模塊 a*",defT:0.6},
 ];
+/* 納入判定的層：正式驗證一律四層全開；只有做層組合實印實驗時才會縮減。
+   縮減後，未納入的層完全不參與符號一致率與強度統計（否則亂猜的層會拖垮判定）。 */
+let EVAL_MASK="1111";
+function activeLayers(){return LAYERS.filter((L,i)=>EVAL_MASK[i]==="1");}
+function loadEvalMask(){
+  try{const v=localStorage.getItem("evalMask");if(/^[01]{4}$/.test(v||""))EVAL_MASK=v;}catch(e){}
+  document.querySelectorAll("#evalMaskBox input").forEach(i=>{
+    i.checked=EVAL_MASK[LAYERS.findIndex(L=>L.k===i.dataset.k)]==="1";});
+}
 function loadT(){
   const o={};for(const L of LAYERS)o[L.k]=L.defT;
   try{const t=JSON.parse(localStorage.getItem("gateT")||"{}");
@@ -420,15 +440,17 @@ const MAG_FLOOR=0.3;
 // 52 格全對若靠瞎猜的機率是 2^-52（約 2e-16）→ 一致率極高時本身就是壓倒性證據，
 // 不需要再要求強度達標，否則印刷偏淡的正品會被誤殺（這正是委外印刷的主要風險）。
 function decide(avg,T){
+  const ACT=activeLayers();
+  const need=Math.max(1,ACT.length-1);     // 允許一層未達門檻；四層時＝3，與原規則相同
   let signOK=true,passCnt=0;
-  for(const L of LAYERS){
+  for(const L of ACT){
     const v=avg[L.k];
     if(!(v>0))signOK=false;
     if(v>=T[L.k])passCnt++;
   }
   const ag=agreement(avg);
   const rate=ag?ag.rate:null;
-  const mags=LAYERS.map(L=>Math.abs(avg[L.k])).filter(Number.isFinite).sort((a,b)=>a-b);
+  const mags=ACT.map(L=>Math.abs(avg[L.k])).filter(Number.isFinite).sort((a,b)=>a-b);
   const magMed=mags.length?mags[Math.floor(mags.length/2)]:0;
   const magOK=magMed>=MAG_FLOOR;
   // 主判定＝符號一致率（不受強度變異影響）；強度只能把 PASS 降級為 HOLD，不能單獨造成 PASS
@@ -436,12 +458,12 @@ function decide(avg,T){
   if(rate!=null){
     if(rate<=AGREE_FAIL){pass=false;cls="fail";}
     else if(rate>=AGREE_STRONG&&magOK){pass=true;cls="pass";}   // 符號證據壓倒性且過底線
-    else if(rate>=AGREE_PASS&&passCnt>=3){pass=true;cls="pass";} // 中段才需要強度佐證
+    else if(rate>=AGREE_PASS&&passCnt>=need){pass=true;cls="pass";} // 中段才需要強度佐證
     else{pass=false;cls="hold";}
   }else{                                   // 無分格資料時退回舊規則
-    pass=signOK&&passCnt>=3;cls=pass?"pass":(passCnt===0?"fail":"hold");
+    pass=signOK&&passCnt>=need;cls=pass?"pass":(passCnt===0?"fail":"hold");
   }
-  return{pass,cls,signOK,passCnt,agree:rate,agreeInfo:ag,magMed,magOK};
+  return{pass,cls,signOK,passCnt,nAct:ACT.length,agree:rate,agreeInfo:ag,magMed,magOK};
 }
 
 /* ===== 狀態 ===== */
@@ -474,7 +496,9 @@ function fakeRecord(serial,token){
 }
 function drawLayers(avg,T,r,ok){
   $("layerCard").style.display="";
-  $("layerTitle").textContent=ok?"四條隱碼訊號皆足夠":"隱碼訊號微弱或消失";
+  const nAct=r&&r.nAct!=null?r.nAct:LAYERS.length;
+  $("layerTitle").textContent=ok?(nAct===LAYERS.length?"四條隱碼訊號皆足夠":`納入判定的 ${nAct} 條隱碼訊號皆足夠`)
+                                :"隱碼訊號微弱或消失";
   // 主指標：符號一致率（與訊號強度無關，強度被印刷變異壓掉一半也不影響）
   const rate=r&&r.agree!=null?r.agree:null;
   const agBar=rate==null?"":`<div class="lrow" style="margin-bottom:4px">
@@ -484,20 +508,22 @@ function drawLayers(avg,T,r,ok){
         <span class="th" style="left:${AGREE_FAIL*100}%"></span><span class="th" style="left:${AGREE_PASS*100}%"></span></span>
       <span class="nm" style="grid-column:1/-1;font-size:.72rem">${r.agreeInfo?r.agreeInfo.correct+"/"+r.agreeInfo.valid+" 格符號正確":""}　·　仿品期望值 50%　·　≥${AGREE_PASS*100}% 合格</span>
     </div>`;
+  const actKeys=activeLayers().map(L=>L.k);
   $("layerRows").innerHTML=agBar+LAYERS.map(L=>{
     const v=avg?avg[L.k]:0, th=T[L.k];
-    const good=v>0&&v>=th;
+    const inEval=actKeys.includes(L.k);
+    const good=inEval&&v>0&&v>=th;
     const pct=Math.max(0,Math.min(100,(v/(th*2.5))*100));
     const thPct=Math.min(100,(th/(th*2.5))*100);
     return`<div class="lrow">
-      <span class="nm">${L.name}</span>
+      <span class="nm">${L.name}${inEval?"":"　<small>（實驗：不計入）</small>"}</span>
       <span class="vl ${good?'lyOK':'lyNG'}">${Number.isFinite(v)?v.toFixed(2):"–"}</span>
       <span class="lbar ${good?'':'no'}"><i style="width:${pct}%"></i><span class="th" style="left:${thPct}%"></span></span>
     </div>`;
   }).join("");
   $("layerFoot").innerHTML=ok
-    ?`四條隱碼的統計訊號方向正確、強度高於門檻（豎線）——這是<b>廟方發放的實體印刷標籤</b>。`
-    :`影印、掃描重印、翻拍都會把近黑歸一成純黑、近白漂成純白，隱碼因此消失。符號一致率 ${r&&r.agree!=null?Math.round(r.agree*100)+"%":"–"}（正品應近 100%，訊號被抹除後只能亂猜，期望值 50%）、${r?r.passCnt:0}/4 層強度達標。`;
+    ?`${nAct===LAYERS.length?"四條隱碼的統計訊號":"納入判定的隱碼統計訊號"}方向正確、強度高於門檻（豎線）——這是<b>廟方發放的實體印刷標籤</b>。`
+    :`影印、掃描重印、翻拍都會把近黑歸一成純黑、近白漂成純白，隱碼因此消失。符號一致率 ${r&&r.agree!=null?Math.round(r.agree*100)+"%":"–"}（正品應近 100%，訊號被抹除後只能亂猜，期望值 50%）、${r?r.passCnt:0}/${nAct} 層強度達標。`;
 }
 function showPass(avg,T,r){
   hideAll();
@@ -655,20 +681,31 @@ function finishCam(){
 
 /* ===== 除錯面板 ===== */
 function fillDebug(avg,T,r){
+  const actK=activeLayers().map(L=>L.k);
   $("dbgRows").innerHTML=LAYERS.map(L=>{
-    const v=avg?avg[L.k]:NaN, ok=v>0&&v>=T[L.k];
-    return`<tr><td>${L.name}</td><td><b>${Number.isFinite(v)?v.toFixed(2):"–"}</b></td>
+    const v=avg?avg[L.k]:NaN, inEval=actK.includes(L.k), ok=inEval&&v>0&&v>=T[L.k];
+    return`<tr><td>${L.name}${inEval?"":"　（不計入）"}</td><td><b>${Number.isFinite(v)?v.toFixed(2):"–"}</b></td>
       <td class="${v>0?'lyOK':'lyNG'}">${v>0?"正確":"錯誤"}</td>
       <td><input data-k="${L.k}" value="${T[L.k]}"></td>
       <td class="${ok?'lyOK':'lyNG'}">${ok?"過":"未過"}</td></tr>`;
   }).join("");
   const ai=r&&r.agreeInfo;
   const perTxt=ai?LAYERS.map(L=>{const p=ai.per[L.k];return p&&p.rate!=null?`${p.correct}/${p.valid}`:"–";}).join(" "):"–";
+  const nAct=r&&r.nAct!=null?r.nAct:LAYERS.length;
   const sg=avg&&avg.sigma?avg.sigma.toFixed(2):"–", sn=avg&&avg.snr?avg.snr.toFixed(1):"–";
   $("dbgMeta").textContent=`取樣 ${samples.length} 幀 · 每模塊 ${avg&&avg.mpx?avg.mpx.toFixed(1):"–"} px · 雜訊σ ${sg}（功能圖樣估得）· 訊噪比 ${sn} · `
     +`符號一致率 ${r&&r.agree!=null?(r.agree*100).toFixed(1)+"%":"–"}（${ai?ai.correct+"/"+ai.valid:"–"} 格，各層 ${perTxt}）`
-    +` · 強度達標 ${r?r.passCnt:0}/4 · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`;
+    +` · 強度達標 ${r?r.passCnt:0}/${nAct}`
+    +(nAct<LAYERS.length?`（實驗：只判定 ${EVAL_MASK}）`:"")
+    +` · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`;
 }
+document.querySelectorAll("#evalMaskBox input").forEach(i=>i.addEventListener("change",()=>{
+  EVAL_MASK=LAYERS.map(L=>
+    document.querySelector(`#evalMaskBox input[data-k="${L.k}"]`).checked?"1":"0").join("");
+  try{localStorage.setItem("evalMask",EVAL_MASK);}catch(e){}
+  if(lastAvg)$("btnReeval").click();
+}));
+loadEvalMask();
 $("btnReeval").onclick=()=>{
   if(!lastAvg)return;
   const T={};
@@ -753,6 +790,21 @@ $("btnCheck").onclick=()=>{
 };
 (function boot(){
   const q=new URLSearchParams(location.search);
+  // ?layers=1010 → 這一頁只判定指定的層（層組合實印實驗用）。
+  // 只作用於本次載入，不覆寫校定面板存在 localStorage 的預設值。
+  const ql=q.get("layers");
+  if(ql!=null){
+    EVAL_MASK=normLayerMask(ql);
+    document.querySelectorAll("#evalMaskBox input").forEach(i=>{
+      i.checked=EVAL_MASK[LAYERS.findIndex(L=>L.k===i.dataset.k)]==="1";});
+    const on=LAYERS.filter((L,i)=>EVAL_MASK[i]==="1").map(L=>L.name).join("、")||"（無）";
+    $("comboTag").style.display="";
+    $("comboTag").innerHTML=`<b>⚠ 實驗模式，不是正式驗證：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
+      +`這一頁只判定 ${on}，其餘層不計入，因此<b>判定結果不代表這張標籤是真品</b>。`
+      +(EVAL_MASK==="0000"?"<br>此組合本來就沒有隱碼，判不過才是正確結果——它是對照組。":"")
+      +`<br>正式驗證請用不帶 <code>?layers</code> 參數的網址：`
+      +`<a href="${location.pathname}${location.hash}" style="color:inherit">點此重新以四層判定</a>`;
+  }
   const d=q.get("demo");
   const m=parseLabelCode(location.hash);
   if(m){
