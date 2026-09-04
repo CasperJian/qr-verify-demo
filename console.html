@@ -279,6 +279,11 @@
       <b>開通防偽層</b>＝這批標籤送印時是否加上印刷才有的防偽訊號。未開通者只有數位序號與簽章：掃碼仍可查得到、
       簽章仍然有效，但拍攝驗證那一關會判不過。實務上用在贈品、內部樣品這類不需要防偽的批次。
     </p>
+    <p class="hint" style="margin-top:8px; border-left:3px solid var(--press); padding-left:11px">
+      <b>這裡產生的碼可以示範什麼：</b>掃碼落地、簽章驗證、以及下方管理台的停用／作廢是否真的擋得下來。
+      <b>不能示範什麼：</b>拍攝驗證那一關——防偽層是<b>印刷時</b>加上去的，螢幕上沒有，所以拍螢幕必定判不過。
+      要看完整通過的畫面，請拿實體印出來的標籤（清單中的 <span class="mono">JS17C-FCHAQ</span> 就是已印出的那張）。
+    </p>
 
     <div id="issueOut" style="display:none">
       <div class="issued">
@@ -293,8 +298,10 @@
             <dt>QR 內容</dt><dd id="oUrl">—</dd>
             <dt>品項／批次</dt><dd id="oItem">—</dd>
             <dt>防偽層</dt><dd id="oHidden">—</dd>
+            <dt>啟用狀態</dt><dd id="oStatus">—</dd>
           </dl>
           <div class="row" style="margin-top:14px">
+            <button id="btnActivate" class="sm">啟用這一批</button>
             <button id="btnQrPng" class="sm">下載這張 QR（PNG）</button>
             <button id="btnCsv" class="sm">匯出本批 CSV（交印刷廠）</button>
             <a id="lnkVerify" class="sm" href="#" target="_blank"
@@ -358,14 +365,31 @@
 <!-- ============ 現場示範腳本 ============ -->
 <section id="script">
   <div class="script">
-    <h3>現場示範動線（三分鐘）</h3>
+    <h3>現場示範動線（三分鐘）· 三道防線，各擋一種攻擊</h3>
     <ol>
-      <li>在<a class="inline" href="#issue">發碼台</a>產生一組新碼 —— 序號與簽章是當場算出來的，不是預先準備好的。</li>
-      <li>用手機相機掃畫面上的 QR → 落到消費者驗證頁 → <b>第 1 關簽章通過</b>，顯示「請拍攝標籤」。</li>
-      <li>直接拍<b>螢幕上的 QR</b> → <b>第 2 關判不過</b>。螢幕沒有印刷才有的防偽層，這正是影本與翻拍會被擋下的原因。</li>
-      <li>改拍<b>實際印出來的標籤</b> → 兩關全過，解鎖產品資料。</li>
-      <li>回到<a class="inline" href="#manage">標籤管理</a>把該序號切成「未啟用」，再掃一次 → 後台立刻擋下。</li>
+      <li><b>產生新碼</b>　在<a class="inline" href="#issue">發碼台</a>按一下。序號與簽章當場算出來，不是預先準備好的。
+          新碼預設<b>未啟用</b>。</li>
+      <li><b>第 3 道先登場：管理層</b>　立刻用手機掃畫面上的 QR →
+          <b>被擋下：「此編號尚未啟用」</b>。標籤還沒貼標入庫就流出，一樣沒用。
+          <span class="hint">擋的是「標籤外流、通路竄貨、召回批次」。</span></li>
+      <li><b>品牌端放行</b>　回發碼台按「<b>啟用</b>」→ 再掃一次 → 這次通過，顯示「請拍攝標籤」。
+          後台的一個開關就能即時控制前台驗證。</li>
+      <li><b>第 1 道：號碼層</b>　順帶說明：剛才那關驗的是數位簽章，仿冒者<b>編不出</b>能通過的新號碼。
+          <span class="hint">擋的是「憑空編造號碼」。</span></li>
+      <li><b>第 2 道：隱碼層</b>　直接拍<b>螢幕上的 QR</b> → <b>判不過</b>。
+          螢幕與影本都沒有印刷才有的防偽層。
+          <span class="hint">擋的是「翻印複製」。</span></li>
+      <li><b>真品長什麼樣</b>　最後拿<b>實體印出來的標籤</b>（清單中的 <span class="mono">JS17C-FCHAQ</span>，
+          已啟用且防偽層已開通）→ 兩關全過，解鎖產品資料。</li>
     </ol>
+    <p class="hint" style="margin-top:10px">
+      第 2、3 步的啟用狀態會即時生效，因為管理台與驗證頁在同一個網域下共用同一份標籤登錄。
+      正式導入時這份登錄改放伺服器端，效果一樣但跨裝置生效。
+    </p>
+    <p class="hint" style="margin-top:10px">
+      第 3 步的停用會即時生效，因為管理台與驗證頁在同一個網域下共用同一份標籤登錄。
+      正式導入時這份登錄改放伺服器端，效果一樣但跨裝置生效。
+    </p>
   </div>
 </section>
 
@@ -473,12 +497,24 @@ function issue(){
     ? `<span class="pill on">已開通</span>`
     : `<span class="pill off">未開通（僅數位序號）</span>`;
   $("lnkVerify").href = f.url;
+  paintStatus();
   $("batchNote").innerHTML = qty > 1
     ? `本批共發出 <b>${qty}</b> 組，上方顯示第 1 組；完整清單見<a class="inline" href="#manage">標籤管理</a>，或匯出 CSV。
        新發出的碼預設為<b>未啟用</b>——貼標入庫確認後才啟用，避免標籤在途中流出就能通過驗證。`
     : `新發出的碼預設為<b>未啟用</b>——貼標入庫確認後才啟用，避免標籤在途中流出就能通過驗證。`;
   $("issueOut").style.display = "";
   render();
+}
+/* 結果面板的啟用狀態：與下方清單同一份資料，按鈕會即時反映 */
+function paintStatus(){
+  if(!lastBatch.length) return;
+  const on = lastBatch.every(L => (DB.labels.find(x=>x.serial===L.serial)||L).status === "active");
+  $("oStatus").innerHTML = on
+    ? `<span class="pill on">已啟用</span>`
+    : `<span class="pill off">未啟用</span>　<span class="hint">掃碼會被擋下</span>`;
+  $("btnActivate").textContent = on
+    ? (lastBatch.length>1 ? "停用這一批" : "停用")
+    : (lastBatch.length>1 ? "啟用這一批" : "啟用");
 }
 function autoBatch(){
   const d = new Date();
@@ -611,6 +647,7 @@ $("rows").addEventListener("click", e=>{
     $("lnkVerify").href = url;
     $("batchNote").textContent = "";
     lastBatch = [Object.assign({}, L, {url})];
+    paintStatus();
     $("issueOut").style.display = "";
     $("issueOut").scrollIntoView({block:"center"});
   }
@@ -621,6 +658,15 @@ $("rows").addEventListener("change", e=>{
   const L = DB.labels.find(x=>x.serial === box.closest("tr").dataset.s);
   if(L){ L.hidden = box.checked; save(); render(); }
 });
+$("btnActivate").onclick = ()=>{
+  if(!lastBatch.length) return;
+  const on = lastBatch.every(L => (DB.labels.find(x=>x.serial===L.serial)||L).status === "active");
+  for(const b of lastBatch){
+    const L = DB.labels.find(x=>x.serial===b.serial);
+    if(L) L.status = on ? "inactive" : "active";
+  }
+  save(); paintStatus(); render();
+};
 $("btnIssue").onclick = issue;
 $("btnCsv").onclick = exportCsv;
 $("btnQrPng").onclick = ()=>{

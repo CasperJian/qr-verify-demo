@@ -580,6 +580,46 @@ function showSigFail(serial,token){
   $("btnAgain4").onclick=()=>realMode(false,true);
 }
 
+/* ===== 序號狀態閘門 =====
+   品牌端管理台（console.html）把已簽發標籤的啟用狀態寫在同源的 localStorage。
+   驗證頁在簽章通過後多查一次：序號被停用或作廢就當場擋下，連拍攝那關都不用進。
+   查不到的序號（一般消費者的裝置上不會有這份登錄）維持原本行為，完全不受影響。 */
+const REGISTRY_KEY="qrConsoleDemo/v1";
+function registryLookup(serial){
+  try{
+    const raw=localStorage.getItem(REGISTRY_KEY); if(!raw)return null;
+    const db=JSON.parse(raw); if(!db||!Array.isArray(db.labels))return null;
+    return db.labels.find(L=>L.serial===serial)||null;
+  }catch(e){ return null; }
+}
+const BLOCK_TXT={
+  inactive:{h:"此編號尚未啟用",
+    p:"編號與簽章都正確，但品牌端<b>尚未啟用</b>這張標籤——通常代表它還沒完成貼標入庫就流出。驗證到此停止。"},
+  void:{h:"此編號已作廢",
+    p:"編號與簽章都正確，但品牌端已將這張標籤<b>註銷</b>（召回、報廢或確認外流）。驗證到此停止。"},
+};
+/* 回傳 true 表示可以繼續；false 表示已被擋下並畫出停止畫面 */
+function gateSerial(serial,token){
+  const L=registryLookup(serial);
+  if(!L||L.status==="active")return true;
+  const t=BLOCK_TXT[L.status]; if(!t)return true;
+  stopStream(); hideAll();
+  SERIAL=serial;TOKEN=token;
+  $("banner").innerHTML=`<div class="banner no">
+    <span class="icon">⛔</span>
+    <h2>${t.h}</h2>
+    <p>${t.p}</p>
+    <p class="sn">編號 ${serial} · 簽章有效 ✓ · 品牌端狀態 ${L.status==="void"?"已作廢":"未啟用"} ✗</p>
+  </div>`;
+  $("dataCard").style.display="";
+  $("lockWrap").className="locked";
+  $("prodRows").innerHTML=fakeRecord(serial,token||"0000000000")
+    .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
+  $("actionRow").innerHTML=`<button id="btnAgain5">重新掃描</button>`;
+  $("btnAgain5").onclick=()=>realMode(false,true);
+  return false;
+}
+
 /* ===== 相機（只拍一次）===== */
 async function startCam(){
   if(stream)return;
@@ -619,6 +659,7 @@ async function startCam(){
     if(!SERIAL){
       if(hmacSha256Hex(DEMO_KEY,parsed.serial).slice(0,10)!==parsed.token){
         stopStream();showSigFail(parsed.serial,parsed.token);return;}
+      if(!gateSerial(parsed.serial,parsed.token))return;   // 品牌端已停用／作廢
       SERIAL=parsed.serial;TOKEN=parsed.token;
       $("camStatus").textContent="編號有效，正在量測隱碼…";
     }else if(parsed.serial!==SERIAL||parsed.token!==TOKEN){
@@ -764,7 +805,11 @@ function realMode(useHash,autoStart){
   $("btnShot").style.display="none";
   if(SERIAL){
     $("scanTitle").textContent="第 2 步：拍攝標籤";
-    $("scanLead").innerHTML=`編號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明編號是廟方系統簽發的，影印本上的編號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`;
+    const reg=registryLookup(SERIAL);
+    $("scanLead").innerHTML=`編號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明編號是廟方系統簽發的，影印本上的編號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`
+      +(reg&&reg.hidden===false
+        ?`<br><br><b>注意：</b>品牌端記載這批標籤<b>未開通防偽層</b>，只有數位編號與簽章。拍攝這一關本來就過不了——這是設定，不是故障。`
+        :"");
     $("btnCam").textContent="開啟相機拍攝標籤";
   }else{
     $("scanTitle").textContent="請將標籤放進框內";
@@ -787,6 +832,7 @@ $("btnCheck").onclick=()=>{
   if(!/^[0-9A-Z]{5}-[0-9A-Z]{5}$/.test(s)||!/^[0-9a-f]{10}$/.test(t)){
     alert("格式不對：序號為 5-5 碼英數，簽章為 10 碼十六進位。");return;}
   if(hmacSha256Hex(DEMO_KEY,s).slice(0,10)!==t){showSigFail(s,t);return;}
+  if(!gateSerial(s,t))return;
   HASH_SERIAL=s;HASH_TOKEN=t;$("manualBox").style.display="none";realMode(true,true);
 };
 (function boot(){
@@ -810,6 +856,7 @@ $("btnCheck").onclick=()=>{
   const m=parseLabelCode(location.hash);
   if(m){
     if(hmacSha256Hex(DEMO_KEY,m.serial).slice(0,10)!==m.token){showSigFail(m.serial,m.token);return;}
+    if(!gateSerial(m.serial,m.token))return;
     HASH_SERIAL=m.serial;HASH_TOKEN=m.token;
   }
   if(d==="pass"){demoPass();return;}
