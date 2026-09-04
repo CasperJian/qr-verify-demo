@@ -27,6 +27,10 @@
   .disclaim{background:var(--warn-bg); border:1px solid var(--warn); border-radius:8px;
     padding:9px 13px; margin:12px 0 4px; font-size:.79rem; color:var(--ink); line-height:1.6;}
   .disclaim b{color:var(--warn);}
+  details.disclaim > summary{cursor:pointer; list-style:none;}
+  details.disclaim > summary::-webkit-details-marker{display:none;}
+  details.disclaim > summary::after{content:"　▾"; color:var(--warn);}
+  details.disclaim[open] > summary::after{content:"　▴";}
 
   /* 品牌列 */
   .brand{display:flex; align-items:center; gap:11px; padding:18px 2px 14px;}
@@ -151,11 +155,13 @@
      padding:11px 13px;margin:0 0 14px;background:#fdecea;color:#5f1512;font-size:.86rem;line-height:1.6">
 </div>
 
-<div class="disclaim">
-  <b>技術示範頁。</b>
-  本頁為防偽技術的概念展示，頁面上的宮廟、品項、編號、日期等皆為<b>虛構的示範資料</b>，
-  不對應任何實際宮廟或發放紀錄。實際開運物真偽請以發放單位為準。
-</div>
+<details class="disclaim">
+  <summary><b>技術示範頁</b>　·　頁面資料為虛構示範</summary>
+  <div style="margin-top:7px">
+    本頁為防偽技術的概念展示，頁面上的宮廟、品項、編號、日期等皆為<b>虛構的示範資料</b>，
+    不對應任何實際宮廟或發放紀錄。實際開運物真偽請以發放單位為準。
+  </div>
+</details>
 
 <!-- 掃描中 -->
 <div class="card" id="scanCard" style="display:none">
@@ -227,13 +233,7 @@
       </table>
       <p class="note" id="dbgMeta" style="margin-top:8px"></p>
       <p class="note">通過規則：納入判定的層方向全部正確，且僅允許一層分離量未達門檻。門檻請用「實印正品 vs 自製仿品」實測校定（存於本機瀏覽器）。</p>
-      <p class="note" style="margin-top:10px"><b>實驗用：只判定選定的層。</b>標籤若刻意只帶部分隱碼層，未帶碼的層在這裡只能亂猜，會把總判定拖成 HOLD／FAIL。做層組合實印實驗時，把該張沒帶碼的層取消勾選，判定就只看實際帶碼的層。只要不是四層全勾，頁面頂端就會出現紅色警示。<b>正式驗證必須保持四層全勾</b>；這個設定<b>不會被記住</b>——重新整理即回到四層全判。</p>
-      <div class="btnrow" id="evalMaskBox" style="gap:14px">
-        <label><input type="checkbox" data-k="DA" checked> ①深 a*</label>
-        <label><input type="checkbox" data-k="DB" checked> ②深 b*</label>
-        <label><input type="checkbox" data-k="WB" checked> ③淺 b*</label>
-        <label><input type="checkbox" data-k="WA" checked> ④淺 a*</label>
-      </div>
+      <p class="note" style="margin-top:10px">判定範圍會依標籤在品牌端登錄的防偽層自動決定；四層一律全部量測並列在上表，未登錄的層標示「不計入」。</p>
       <div class="btnrow">
         <button class="ghost" id="btnReeval">用新門檻重新判定</button>
       </div>
@@ -424,10 +424,7 @@ const LAYERS=[
    縮減後，未納入的層完全不參與符號一致率與強度統計（否則亂猜的層會拖垮判定）。 */
 let EVAL_MASK="1111";
 function activeLayers(){return LAYERS.filter((L,i)=>EVAL_MASK[i]==="1");}
-function syncEvalBoxes(){
-  document.querySelectorAll("#evalMaskBox input").forEach(i=>{
-    i.checked=EVAL_MASK[LAYERS.findIndex(L=>L.k===i.dataset.k)]==="1";});
-}
+function syncEvalBoxes(){}     // 勾選框已移除，判定範圍改由標籤登錄或 ?layers= 決定
 /* 縮減判定層是實驗工具，刻意「不留痕跡」：
    只在本次載入有效，重新整理就回到四層全判。
    之前的版本把它存進 localStorage 又不顯示任何警示——殘留一組 0000 就會讓
@@ -573,11 +570,44 @@ function drawLayers(avg,T,r,ok){
     ?`${nAct===LAYERS.length?"四條隱碼的統計訊號":"納入判定的隱碼統計訊號"}方向正確、強度高於門檻（豎線）——這是<b>廟方發放的實體印刷標籤</b>。`
     :`影印、掃描重印、翻拍都會把近黑歸一成純黑、近白漂成純白，隱碼因此消失。符號一致率 ${r&&r.agree!=null?Math.round(r.agree*100)+"%":"–"}（正品應近 100%，訊號被抹除後只能亂猜，期望值 50%）、${r?r.passCnt:0}/${nAct} 層強度達標。`;
 }
+/* 重號偵測：一物一碼的前提下，同一個編號只該被首位持有者驗證一次。
+   第二次以後出現＝這個編號被複製散布（截圖、翻拍、影本），或標籤外流。
+   這是後台側的防線，與隱碼那道物理防線互補。 */
+function scanCount(serial){
+  try{ return parseInt(localStorage.getItem("scan_"+serial)||"0",10)||0; }catch(e){ return 0; }
+}
+function bumpScan(serial){
+  const n=scanCount(serial)+1;
+  try{ localStorage.setItem("scan_"+serial,String(n)); }catch(e){}
+  return n;
+}
+function showDuplicate(n){
+  hideAll();
+  $("banner").innerHTML=`<div class="banner no">
+    <span class="icon">⚠️</span>
+    <h2>此編號已被驗證過</h2>
+    <p>編號簽章正確，但這個編號<b>先前已經被驗證過 ${n-1} 次</b>。一物一碼的前提下，
+       正品只會被首位持有者驗證一次；重複出現代表這個編號已被<b>複製散布</b>——
+       翻拍、截圖或影印都會產生一模一樣的編號。驗證到此停止。</p>
+    <p class="sn">編號 ${SERIAL} · 累計第 ${n} 次驗證${demoMode?" · 示範資料":""}</p>
+  </div>`;
+  $("dataCard").style.display="";
+  $("lockWrap").className="locked";
+  $("prodRows").innerHTML=fakeRecord(SERIAL,TOKEN||"0000000000")
+    .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
+  $("actionRow").innerHTML=`<button id="btnAgain6">重新掃描</button>`
+    +`<button id="btnResetScan" class="ghost">重設此編號的驗證紀錄（示範用）</button>`;
+  $("btnAgain6").onclick=()=>realMode(false,true);
+  $("btnResetScan").onclick=()=>{
+    try{ localStorage.removeItem("scan_"+SERIAL); }catch(e){}
+    location.reload();
+  };
+}
 function showPass(avg,T,r){
   hideAll();
   const rec=fakeRecord(SERIAL,TOKEN);
-  let n=1;
-  try{n=(parseInt(localStorage.getItem("scan_"+SERIAL)||"0",10)||0)+1;localStorage.setItem("scan_"+SERIAL,String(n));}catch(e){}
+  const n=bumpScan(SERIAL);
+  if(n>1){ showDuplicate(n); return; }
   $("banner").innerHTML=`<div class="banner ok">
     <span class="icon">✅</span>
     <h2>確認為廟方正品</h2>
@@ -804,13 +834,6 @@ function fillDebug(avg,T,r){
     +(nAct<LAYERS.length?`（實驗：只判定 ${EVAL_MASK}）`:"")
     +` · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`;
 }
-document.querySelectorAll("#evalMaskBox input").forEach(i=>i.addEventListener("change",()=>{
-  const picked=LAYERS.map(L=>
-    document.querySelector(`#evalMaskBox input[data-k="${L.k}"]`).checked?"1":"0").join("");
-  URL_MASK=picked;                        // 人工指定後就不再被標籤登錄覆蓋
-  setEvalMask(picked,"manual");           // 不寫入 localStorage，重新整理即復原
-  if(lastAvg)$("btnReeval").click();
-}));
 $("btnReeval").onclick=()=>{
   if(!lastAvg)return;
   const T={};
@@ -923,12 +946,12 @@ $("btnCheck").onclick=()=>{
     if(el){
       el.style.display="";
       el.style.borderColor="#9a6b10"; el.style.background="#f8f1e0"; el.style.color="#4a3505";
-      el.innerHTML=`<b>示範模式：第 2 關（拍攝量測）為模擬結果</b><br>`
-        +`這個網址帶了 <code>?demo=live</code>，因此不需要實體標籤也能看到完整的通過畫面。`
-        +`<b>編號與數位簽章仍然是實際驗算的</b>——改動編號任何一個字元都會被擋下。<br>`
+      el.innerHTML=`<details><summary style="cursor:pointer"><b>示範模式</b>　·　第 2 關（拍攝量測）為模擬結果　▾</summary>`
+        +`<div style="margin-top:6px">這個網址帶了 <code>?demo=live</code>，不需要實體標籤也能看到完整流程。`
+        +`<b>編號與數位簽章仍然是實際驗算的</b>——改動任何一個字元都會被擋下。`
         +`實體防偽層無法在螢幕上重現，要看真正的量測請改用`
         +`<a href="${location.pathname}${location.hash}" style="color:inherit"><b>相機實際量測</b></a>`
-        +`（需要印出來的標籤）。`;
+        +`（需印出來的標籤）。</div></details>`;
     }
     return;
   }

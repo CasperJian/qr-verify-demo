@@ -38,6 +38,10 @@
   .disclaim{background:var(--warn-bg); border:1px solid var(--warn-line); border-radius:8px;
     padding:10px 14px; margin:16px 0 0; font-size:.79rem; line-height:1.65;}
   .disclaim b{color:var(--warn);}
+  details.disclaim > summary{cursor:pointer; list-style:none;}
+  details.disclaim > summary::-webkit-details-marker{display:none;}
+  details.disclaim > summary::after{content:"　▾"; color:var(--warn);}
+  details.disclaim[open] > summary::after{content:"　▴";}
 
   h1{font-size:1.5rem; margin:26px 0 6px; line-height:1.45;}
   .lede{color:var(--ink-soft); margin:0 0 8px; max-width:56em;}
@@ -180,11 +184,14 @@
 
 <div class="wrap">
 
-<div class="disclaim">
-  <b>示範環境。</b>本頁展示品牌端的發碼與管理介面，資料存在您這台裝置的瀏覽器裡，重新整理仍在、關掉可清除，
-  <b>不是真實營運系統</b>。清單中的驗證次數、地點與時間為模擬資料；您現場產生的新碼則是真的
-  （序號、簽章與 QR 皆為實際計算，掃碼可進到驗證頁）。
-</div>
+<details class="disclaim">
+  <summary><b>示範環境</b>　·　資料存在本機瀏覽器，非真實營運系統</summary>
+  <div style="margin-top:7px">
+    本頁展示品牌端的發碼與管理介面，資料存在您這台裝置的瀏覽器裡，重新整理仍在、關掉可清除。
+    清單中的驗證次數、地點與時間為模擬資料；您現場產生的新碼則是真的
+    （序號、簽章與 QR 皆為實際計算，掃碼可進到驗證頁）。
+  </div>
+</details>
 
 <h1>從發碼、印製到現場驗證，<br>整條鏈路由品牌方自己掌握</h1>
 <p class="lede">
@@ -409,34 +416,32 @@
 
 <!-- ============ 現場示範腳本 ============ -->
 <section id="script">
-  <div class="script">
-    <h3>現場示範動線（三分鐘）· 三道防線，各擋一種攻擊</h3>
-    <ol>
-      <li><b>產生新碼</b>　在<a class="inline" href="#issue">發碼台</a>按一下。序號與簽章當場算出來，不是預先準備好的。
-          預設是<b>示範碼</b>：手機掃了就能走完整通過流程，不必帶實體標籤。
-          要示範下面第 2～3 步的擋下效果，把「示範碼」關掉再產生一組。</li>
-      <li><b>第 3 道先登場：管理層</b>　立刻用手機掃畫面上的 QR →
-          <b>被擋下：「此編號尚未啟用」</b>。標籤還沒貼標入庫就流出，一樣沒用。
-          <span class="hint">擋的是「標籤外流、通路竄貨、召回批次」。</span></li>
-      <li><b>品牌端放行</b>　回發碼台按「<b>啟用</b>」→ 再掃一次 → 這次通過，顯示「請拍攝標籤」。
-          後台的一個開關就能即時控制前台驗證。</li>
-      <li><b>第 1 道：號碼層</b>　順帶說明：剛才那關驗的是數位簽章，仿冒者<b>編不出</b>能通過的新號碼。
+  <details class="script">
+    <summary style="cursor:pointer;font-weight:700;color:var(--press-deep)">現場示範動線（內部參考）　▾</summary>
+    <ol style="margin-top:10px">
+      <li><b>產生新碼</b>　在<a class="inline" href="#issue">發碼台</a>按一下。序號與簽章當場算出來，
+          不是預先準備好的。</li>
+      <li><b>第 1 道：號碼層</b>　用手機掃畫面上的 QR → 通過，解鎖產品資料。
+          接著<b>當場改編號一個字元</b> → <b>編號無效</b>。
           <span class="hint">擋的是「憑空編造號碼」。</span></li>
-      <li><b>第 2 道：隱碼層</b>　直接拍<b>螢幕上的 QR</b> → <b>判不過</b>。
-          螢幕與影本都沒有印刷才有的防偽層。
-          <span class="hint">擋的是「翻印複製」。</span></li>
-      <li><b>真品長什麼樣</b>　最後拿<b>實體印出來的標籤</b>（清單中的 <span class="mono">JS17C-FCHAQ</span>，
-          已啟用且防偽層已開通）→ 兩關全過，解鎖產品資料。</li>
+      <li><b>第 2 道：重號偵測</b>　把剛才那個 QR <b>截圖／翻拍，再掃一次</b> →
+          <b>此編號已被驗證過</b>。編號可以被複製，但同一個編號重複出現就是破綻。
+          <span class="hint">擋的是「截圖、翻拍、影本散布」。</span>
+          （要重跑，按畫面上的「重設此編號的驗證紀錄」）</li>
+      <li><b>第 3 道：管理層</b>　回<a class="inline" href="#manage">標籤管理</a>把序號按「停用」→
+          再掃 → <b>此編號尚未啟用</b>。
+          <span class="hint">擋的是「標籤外流、通路竄貨、召回批次」。</span></li>
+      <li><b>第 4 道：隱碼層（需實體標籤）</b>　拿<b>實體印出來的標籤</b>
+          （<span class="mono">JS17C-FCHAQ</span>，用不帶 <code>?demo=live</code> 的網址）→
+          相機拍攝 → 兩關全過。把它<b>影印一份</b>再拍 → 判不過。
+          <span class="hint">擋的是「翻印重製實體標籤」——這一道只有實體印刷品能演。</span></li>
     </ol>
     <p class="hint" style="margin-top:10px">
-      第 2、3 步的啟用狀態會即時生效，因為管理台與驗證頁在同一個網域下共用同一份標籤登錄。
-      正式導入時這份登錄改放伺服器端，效果一樣但跨裝置生效。
+      啟用狀態與重號紀錄會即時生效，因為管理台與驗證頁在同一個網域下共用同一份資料；
+      跨裝置不同步，管理台的操作與掃碼請在同一台裝置上進行。正式導入時改放伺服器端，
+      效果一樣但跨裝置生效。
     </p>
-    <p class="hint" style="margin-top:10px">
-      第 3 步的停用會即時生效，因為管理台與驗證頁在同一個網域下共用同一份標籤登錄。
-      正式導入時這份登錄改放伺服器端，效果一樣但跨裝置生效。
-    </p>
-  </div>
+  </details>
 </section>
 
 <footer>
