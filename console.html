@@ -310,14 +310,6 @@
       <input type="text" id="fBase" class="mono" style="width:min(30em,90%)" spellcheck="false">
       <span class="hint">QR 內容＝此網址＋不透明短碼。現場若要用區網示範可改這裡。</span>
     </div>
-    <div class="row">
-      <span class="f">掃碼行為</span>
-      <label class="sw" title="讓產生的碼在任何裝置掃描後都能走完整通過流程">
-        <input type="checkbox" id="fDemoCode" checked><i></i>
-        <span class="f" style="color:var(--ink)">示範碼（掃描即可完整通過）</span>
-      </label>
-      <span class="hint" id="demoHint"></span>
-    </div>
     <p class="hint" style="margin-top:12px">
       <b>防偽層</b>＝這批標籤送印時要加上哪幾層防偽訊號，四層可以分別開關。
       驗證端會依這裡的登錄<b>自動判定該張標籤該有哪幾層</b>——沒開的層不列入判定，但仍會量測並顯示分析數據。
@@ -325,14 +317,10 @@
       實務上用在贈品、內部樣品這類不需要防偽的批次。
     </p>
     <p class="hint" style="margin-top:8px; border-left:3px solid var(--press); padding-left:11px">
-      <b>為什麼需要「示範碼」：</b>防偽層是<b>印刷時</b>加上去的，螢幕上沒有，所以拍螢幕那一關在真實模式下必定判不過；
-      而標籤的登錄資料只存在產生碼的那台裝置，用另一支手機掃是查不到的。示範碼把旗標寫進 QR 網址本身，
-      因此<b>換任何裝置、任何瀏覽器掃都能走完整通過流程</b>，不需要實體標籤。
-      驗證頁會明確標示第 2 關為模擬結果，<b>編號與簽章仍然實際驗算</b>——改一個字元照樣被擋下。<br>
-      <b>筆電開管理台、手機掃碼</b>也成立：啟用狀態會寫進 QR 網址，後台一按停用畫面上的 QR 就重畫，
-      客戶再掃一次就會被擋下（狀態只能加嚴不能放寬）。
-      關掉這個開關就是真實行為：拍螢幕過不了，要完整通過必須拿實體印出來的標籤
-      （清單中的 <span class="mono">JS17C-FCHAQ</span> 就是已印出的那張）。
+      <b>這一頁展示的是資料流</b>：序號怎麼發、簽章怎麼綁、批次與狀態怎麼管、QR 長什麼樣。
+      這裡產生的序號、簽章與 QR <b>都是實際計算的</b>，掃碼可以進到消費者驗證頁並通過簽章檢查。<br>
+      <b>防偽層本身不在這一頁驗證。</b>防偽訊號是<b>印刷時</b>加上去的，螢幕上沒有，
+      所以拍螢幕永遠過不了拍攝那一關——那要用實體印出來的標籤，或看生成端的翻印攻擊模擬。
     </p>
 
     <div id="issueOut" style="display:none">
@@ -340,10 +328,6 @@
         <div class="qrbox">
           <canvas id="qrCv" width="10" height="10"></canvas>
           <div class="cap" id="qrCap"></div>
-          <div id="qrFlash" style="display:none;margin-top:8px;font-size:.76rem;font-weight:700;
-               color:#9a6b10;background:#f8f1e0;border:1px solid #e0cb96;border-radius:5px;padding:5px 7px">
-            QR 已更新<br>請重新掃描
-          </div>
         </div>
         <div>
           <dl class="kv">
@@ -355,7 +339,6 @@
             <dt>啟用狀態</dt><dd id="oStatus">—</dd>
             <dt>中央圖</dt><dd id="oLogo">—</dd>
             <dt>掃碼自檢</dt><dd id="oCheck">—</dd>
-            <dt>掃碼行為</dt><dd id="oDemo">—</dd>
           </dl>
           <div class="row" style="margin-top:14px">
             <button id="btnActivate" class="sm">啟用這一批</button>
@@ -425,27 +408,21 @@
   <details class="script">
     <summary style="cursor:pointer;font-weight:700;color:var(--press-deep)">現場示範動線（內部參考）　▾</summary>
     <ol style="margin-top:10px">
-      <li><b>產生新碼</b>　在<a class="inline" href="#issue">發碼台</a>按一下。序號與簽章當場算出來，
-          不是預先準備好的。</li>
-      <li><b>第 1 道：號碼層</b>　用手機掃畫面上的 QR → 通過，解鎖產品資料。
-          接著<b>當場改編號一個字元</b> → <b>編號無效</b>。
-          <span class="hint">擋的是「憑空編造號碼」。</span></li>
-      <li><b>第 2 道：重號偵測</b>　把剛才那個 QR <b>截圖／翻拍，再掃一次</b> →
-          <b>此編號已被驗證過</b>。編號可以被複製，但同一個編號重複出現就是破綻。
-          <span class="hint">擋的是「截圖、翻拍、影本散布」。</span>
-          （要重跑，按畫面上的「重設此編號的驗證紀錄」）</li>
-      <li><b>第 3 道：管理層</b>　回<a class="inline" href="#manage">標籤管理</a>把序號按「停用」→
-          再掃 → <b>此編號尚未啟用</b>。
-          <span class="hint">擋的是「標籤外流、通路竄貨、召回批次」。</span></li>
-      <li><b>第 4 道：隱碼層（需實體標籤）</b>　拿<b>實體印出來的標籤</b>
-          （<span class="mono">JS17C-FCHAQ</span>，用不帶 <code>?demo=live</code> 的網址）→
-          相機拍攝 → 兩關全過。把它<b>影印一份</b>再拍 → 判不過。
-          <span class="hint">擋的是「翻印重製實體標籤」——這一道只有實體印刷品能演。</span></li>
+      <li><b>資料流</b>（本頁）　照著上面的流程圖講一遍：發碼 → 印製 → 出貨 → 消費者驗證 → 後台追蹤，
+          再現場發一組碼，展示序號、簽章、QR 與中央 logo。</li>
+      <li><b>號碼偽造不了</b>（驗證頁）　手機掃剛才那顆 QR → 簽章通過。
+          當場<b>改編號一個字元</b> → <b>編號無效</b>。</li>
+      <li><b>翻拍翻印會失效</b>（生成端，最有說服力）　在筆電開
+          <span class="mono">生成器_單檔版.html</span>，切換三種翻印通道，
+          畫面直接跑出正品與仿品的四層殘留率：影印機 96%↔17%、噴墨重印 96%↔36%、
+          高階設備 96%↔55%，判定 PASS ↔ FAIL。<b>這是真的在算，不是預錄畫面。</b></li>
+      <li><b>驗證頁長什麼樣</b>　用示範網址直接看兩種結果：
+          <span class="mono">?demo=pass</span>（通過）與 <span class="mono">?demo=fail</span>（未通過）。</li>
+      <li><b>有實體標籤的話</b>　拿印出來的標籤用相機實測；把它影印一份再拍，對照著看。</li>
     </ol>
     <p class="hint" style="margin-top:10px">
-      啟用狀態與重號紀錄會即時生效，因為管理台與驗證頁在同一個網域下共用同一份資料；
-      跨裝置不同步，管理台的操作與掃碼請在同一台裝置上進行。正式導入時改放伺服器端，
-      效果一樣但跨裝置生效。
+      本頁與驗證頁<b>刻意不串接</b>：這裡是介面與資料流的展示，防偽判定的證明放在生成端的攻擊模擬。
+      正式導入時發碼、金鑰與判定都會移到伺服器端，屆時才是真的連動。
     </p>
   </details>
 </section>
@@ -619,35 +596,8 @@ function redrawCurrent(){
   const f = lastBatch[0];
   paintQRPanel(f, f.url || ($("fBase").value.trim() + "#" + f.code));
 }
-/* 手機掃的是筆電螢幕上這顆 QR，而手機查不到筆電的標籤登錄。
-   因此把啟用狀態（st）與 QR 版次（n）寫進網址：
-   後台一改狀態就重畫 QR，客戶再掃一次就會看到新結果。
-   st 只認 inactive／void（只能加嚴），active 一律忽略，不會被拿來繞過。
-   版次 n 讓重號計數跟著這顆 QR 走——改過狀態後重新發出的 QR 算新的一輪。 */
 function labelUrl(L){
-  const base = ($("fBase").value.trim() || defaultBase());
-  const q = [];
-  if(L.demo) q.push("demo=live");
-  if(L.nonce) q.push("n=" + L.nonce);
-  if(L.status && L.status !== "active") q.push("st=" + L.status);
-  return base + (q.length ? (base.includes("?") ? "&" : "?") + q.join("&") : "") + "#" + L.code;
-}
-/* 狀態變動 → 換一個版次並重畫畫面上的 QR */
-function bumpLabel(L){
-  L.nonce = (L.nonce || 1) + 1;
-  L.url = labelUrl(L);
-  save();
-  if(lastBatch.length === 1 && lastBatch[0].serial === L.serial){
-    lastBatch[0] = Object.assign({}, L);
-    paintQRPanel(lastBatch[0]);
-    flashQR();
-  }
-}
-function flashQR(){
-  const el = $("qrFlash"); if(!el) return;
-  el.style.display = "";
-  clearTimeout(window.__flashT);
-  window.__flashT = setTimeout(()=>{ el.style.display = "none"; }, 6000);
+  return ($("fBase").value.trim() || defaultBase()) + "#" + L.code;
 }
 function paintQRPanel(L, url){
   url = url || labelUrl(L);
@@ -661,10 +611,6 @@ function paintQRPanel(L, url){
   $("oHidden").innerHTML = maskBadges(L.layers,true) + `<span class="lyname">${maskName(L.layers)}</span>`;
   $("oLogo").innerHTML = (nLogo>0 && LOGO_IMG) ? `${nLogo}×${nLogo} 模塊`
                        : (nLogo>0 ? `<span class="hint">已選 ${nLogo}×${nLogo}，尚未上傳圖檔</span>` : "不放圖");
-  const isDemo = /[?&]demo=live(&|$|#)/.test(url);
-  $("oDemo").innerHTML = isDemo
-    ? `<span class="pill warn">示範碼</span>　<span class="hint">任何裝置掃描都能走完整通過流程；第 2 關為模擬結果</span>`
-    : `<span class="pill on">真實驗證</span>　<span class="hint">需拿實體印出來的標籤才能通過第 2 關</span>`;
   const ck = qrSelfCheck(url, nLogo);
   $("oCheck").innerHTML =
       ck.level==="ok"       ? `<span class="pill on">可正常掃描</span>　<span class="hint">${ck.pass}/${ck.total} 種解析度皆解得出</span>`
@@ -682,17 +628,13 @@ function issue(){
   const qty = Math.max(1, Math.min(50, +$("fQty").value || 1));
   const layers = ISSUE_MASK;
   const base = $("fBase").value.trim() || defaultBase();
-  const demoCode = $("fDemoCode").checked;
   const today = new Date().toISOString().slice(0,10);
 
   lastBatch = [];
   for(let i=0;i<qty;i++){
     const serial = randSerial();
-    const L = mkLabel(serial, item, batch, layers,
-                      demoCode ? "active" : "inactive", today, 0, null);
+    const L = mkLabel(serial, item, batch, layers, "inactive", today, 0, null);
     L.logo = LOGO_IMG ? (+$("fLogoSize").value || 0) : 0;
-    L.demo = demoCode;
-    L.nonce = 1;
     L.url = labelUrl(L);
     DB.labels.unshift(L);
     lastBatch.push(L);
@@ -867,7 +809,7 @@ $("rows").addEventListener("click", e=>{
   const url = labelUrl(L);
   if(act === "toggle"){
     L.status = L.status === "active" ? "inactive" : "active";
-    bumpLabel(L); render();
+    save(); render();
   }else if(act === "open"){
     window.open(url, "_blank");
   }else if(act === "qr"){
@@ -883,7 +825,7 @@ $("btnActivate").onclick = ()=>{
   const on = lastBatch.every(L => (DB.labels.find(x=>x.serial===L.serial)||L).status === "active");
   for(const b of lastBatch){
     const L = DB.labels.find(x=>x.serial===b.serial);
-    if(L){ L.status = on ? "inactive" : "active"; bumpLabel(L); }
+    if(L) L.status = on ? "inactive" : "active";
   }
   save(); paintStatus(); render();
 };
@@ -907,12 +849,6 @@ $("btnReset").onclick = ()=>{
 });
 
 /* ===== 啟動 ===== */
-function paintDemoHint(){
-  $("demoHint").textContent = $("fDemoCode").checked
-    ? "產生的碼會發成「已啟用」，掃了就能看到完整通過畫面。"
-    : "真實行為：新碼預設未啟用，且須以實體印刷標籤才能通過拍攝那一關。";
-}
-$("fDemoCode").addEventListener("change", paintDemoHint);
 $("fLogoFile").addEventListener("change", e=>{
   const f = e.target.files && e.target.files[0];
   if(f) acceptLogo(f);
@@ -928,7 +864,6 @@ $("btnLogoClear").onclick = ()=>{
   if(lastBatch.length){ lastBatch[0].logo = 0; redrawCurrent(); }
 };
 paintIssueMask();
-paintDemoHint();
 loadLogo();
 $("fBase").value = defaultBase();
 $("fBatch").value = autoBatch();

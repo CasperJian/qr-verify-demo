@@ -423,6 +423,7 @@ const LAYERS=[
 /* 納入判定的層：正式驗證一律四層全開；只有做層組合實印實驗時才會縮減。
    縮減後，未納入的層完全不參與符號一致率與強度統計（否則亂猜的層會拖垮判定）。 */
 let EVAL_MASK="1111";
+let URL_MASK=null;          // 網址帶了 ?layers= 就以它為準
 function activeLayers(){return LAYERS.filter((L,i)=>EVAL_MASK[i]==="1");}
 function syncEvalBoxes(){}     // 勾選框已移除，判定範圍改由標籤登錄或 ?layers= 決定
 /* 縮減判定層是實驗工具，刻意「不留痕跡」：
@@ -570,51 +571,11 @@ function drawLayers(avg,T,r,ok){
     ?`${nAct===LAYERS.length?"四條隱碼的統計訊號":"納入判定的隱碼統計訊號"}方向正確、強度高於門檻（豎線）——這是<b>廟方發放的實體印刷標籤</b>。`
     :`影印、掃描重印、翻拍都會把近黑歸一成純黑、近白漂成純白，隱碼因此消失。符號一致率 ${r&&r.agree!=null?Math.round(r.agree*100)+"%":"–"}（正品應近 100%，訊號被抹除後只能亂猜，期望值 50%）、${r?r.passCnt:0}/${nAct} 層強度達標。`;
 }
-/* 重號偵測：一物一碼的前提下，同一個編號只該被首位持有者驗證一次。
-   第二次以後出現＝這個編號被複製散布（截圖、翻拍、影本），或標籤外流。
-   這是後台側的防線，與隱碼那道物理防線互補。 */
-/* 計數綁在「這顆 QR」而不是只綁序號：管理台改過狀態後會重發一顆新版次的 QR，
-   那就是新的一輪，不會被上一輪的次數卡住。截圖與原圖版次相同，因此照樣抓得到重號。 */
-function scanKey(serial){
-  let n="";
-  try{ n=new URLSearchParams(location.search).get("n")||""; }catch(e){}
-  return "scan_"+serial+(n?("_"+n):"");
-}
-function scanCount(serial){
-  try{ return parseInt(localStorage.getItem(scanKey(serial))||"0",10)||0; }catch(e){ return 0; }
-}
-function bumpScan(serial){
-  const n=scanCount(serial)+1;
-  try{ localStorage.setItem(scanKey(serial),String(n)); }catch(e){}
-  return n;
-}
-function showDuplicate(n){
-  hideAll();
-  $("banner").innerHTML=`<div class="banner no">
-    <span class="icon">⚠️</span>
-    <h2>此編號已被驗證過</h2>
-    <p>編號簽章正確，但這個編號<b>先前已經被驗證過 ${n-1} 次</b>。一物一碼的前提下，
-       正品只會被首位持有者驗證一次；重複出現代表這個編號已被<b>複製散布</b>——
-       翻拍、截圖或影印都會產生一模一樣的編號。驗證到此停止。</p>
-    <p class="sn">編號 ${SERIAL} · 累計第 ${n} 次驗證${demoMode?" · 示範資料":""}</p>
-  </div>`;
-  $("dataCard").style.display="";
-  $("lockWrap").className="locked";
-  $("prodRows").innerHTML=fakeRecord(SERIAL,TOKEN||"0000000000")
-    .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
-  $("actionRow").innerHTML=`<button id="btnAgain6">重新掃描</button>`
-    +`<button id="btnResetScan" class="ghost">重設此編號的驗證紀錄（示範用）</button>`;
-  $("btnAgain6").onclick=()=>realMode(false,true);
-  $("btnResetScan").onclick=()=>{
-    try{ localStorage.removeItem(scanKey(SERIAL)); }catch(e){}
-    location.reload();
-  };
-}
 function showPass(avg,T,r){
   hideAll();
   const rec=fakeRecord(SERIAL,TOKEN);
-  const n=bumpScan(SERIAL);
-  if(n>1){ showDuplicate(n); return; }
+  let n=1;
+  try{n=(parseInt(localStorage.getItem("scan_"+SERIAL)||"0",10)||0)+1;localStorage.setItem("scan_"+SERIAL,String(n));}catch(e){}
   $("banner").innerHTML=`<div class="banner ok">
     <span class="icon">✅</span>
     <h2>確認為廟方正品</h2>
@@ -664,69 +625,6 @@ function showSigFail(serial,token){
   $("btnAgain4").onclick=()=>realMode(false,true);
 }
 
-/* ===== 序號狀態閘門 =====
-   品牌端管理台（console.html）把已簽發標籤的啟用狀態寫在同源的 localStorage。
-   驗證頁在簽章通過後多查一次：序號被停用或作廢就當場擋下，連拍攝那關都不用進。
-   查不到的序號（一般消費者的裝置上不會有這份登錄）維持原本行為，完全不受影響。 */
-const REGISTRY_KEY="qrConsoleDemo/v1";
-function registryLookup(serial){
-  try{
-    const raw=localStorage.getItem(REGISTRY_KEY); if(!raw)return null;
-    const db=JSON.parse(raw); if(!db||!Array.isArray(db.labels))return null;
-    return db.labels.find(L=>L.serial===serial)||null;
-  }catch(e){ return null; }
-}
-const BLOCK_TXT={
-  inactive:{h:"此編號尚未啟用",
-    p:"編號與簽章都正確，但品牌端<b>尚未啟用</b>這張標籤——通常代表它還沒完成貼標入庫就流出。驗證到此停止。"},
-  void:{h:"此編號已作廢",
-    p:"編號與簽章都正確，但品牌端已將這張標籤<b>註銷</b>（召回、報廢或確認外流）。驗證到此停止。"},
-};
-/* 這張標籤登錄了哪幾層防偽層（相容舊版的 hidden 布林值） */
-function regMask(L){
-  if(!L)return null;
-  if(typeof L.layers==="string"&&/^[01]{4}$/.test(L.layers))return L.layers;
-  if(L.hidden===false)return "0000";
-  return "1111";
-}
-let URL_MASK=null;                 // 網址帶了 ?layers= 就以它為準，不被登錄覆蓋
-/* 掃碼的裝置通常查不到品牌端的標籤登錄（登錄在管理台那台機器上）。
-   因此 QR 網址可以帶 st=inactive／st=void 把狀態一起送過來。
-   只認這兩個值——狀態只能加嚴、不能放寬，所以不會變成繞過閘門的手段。 */
-function urlStatus(){
-  try{
-    const v=new URLSearchParams(location.search).get("st");
-    return (v==="inactive"||v==="void") ? v : null;
-  }catch(e){ return null; }
-}
-/* 回傳 true 表示可以繼續；false 表示已被擋下並畫出停止畫面 */
-function gateSerial(serial,token){
-  const reg=registryLookup(serial);
-  const st=urlStatus();
-  const L=(reg&&reg.status!=="active") ? reg : (st ? {status:st, layers:reg?reg.layers:null} : reg);
-  if(!L||L.status==="active"){
-    if(reg&&URL_MASK==null)setEvalMask(regMask(reg),"registry");   // 依登錄自動判定
-    return true;
-  }
-  const t=BLOCK_TXT[L.status];
-  if(!t){ if(URL_MASK==null)setEvalMask(regMask(L),"registry"); return true; }
-  stopStream(); hideAll();
-  SERIAL=serial;TOKEN=token;
-  $("banner").innerHTML=`<div class="banner no">
-    <span class="icon">⛔</span>
-    <h2>${t.h}</h2>
-    <p>${t.p}</p>
-    <p class="sn">編號 ${serial} · 簽章有效 ✓ · 品牌端狀態 ${L.status==="void"?"已作廢":"未啟用"} ✗</p>
-  </div>`;
-  $("dataCard").style.display="";
-  $("lockWrap").className="locked";
-  $("prodRows").innerHTML=fakeRecord(serial,token||"0000000000")
-    .map(([k,v,m])=>`<div class="prow"><span>${k}</span><b class="${m?'m':''}">${v}</b></div>`).join("");
-  $("actionRow").innerHTML=`<button id="btnAgain5">重新掃描</button>`;
-  $("btnAgain5").onclick=()=>realMode(false,true);
-  return false;
-}
-
 /* ===== 相機（只拍一次）===== */
 async function startCam(){
   if(stream)return;
@@ -766,7 +664,6 @@ async function startCam(){
     if(!SERIAL){
       if(hmacSha256Hex(DEMO_KEY,parsed.serial).slice(0,10)!==parsed.token){
         stopStream();showSigFail(parsed.serial,parsed.token);return;}
-      if(!gateSerial(parsed.serial,parsed.token))return;   // 品牌端已停用／作廢
       SERIAL=parsed.serial;TOKEN=parsed.token;
       $("camStatus").textContent="編號有效，正在量測隱碼…";
     }else if(parsed.serial!==SERIAL||parsed.token!==TOKEN){
@@ -909,13 +806,7 @@ function realMode(useHash,autoStart){
   $("btnShot").style.display="none";
   if(SERIAL){
     $("scanTitle").textContent="第 2 步：拍攝標籤";
-    const rm=regMask(registryLookup(SERIAL));
-    $("scanLead").innerHTML=`編號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明編號是廟方系統簽發的，影印本上的編號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`
-      +(rm==="0000"
-        ?`<br><br><b>注意：</b>品牌端記載這張標籤<b>未開通防偽層</b>，只有數位編號與簽章。拍攝這一關本來就過不了——這是設定，不是故障。`
-        :(rm&&rm!=="1111"
-          ?`<br><br>品牌端記載這張只印了 <b>${layerMaskName(rm)}</b>，判定只計入這些層；四層的量測數據都會列在下方分析中。`
-          :""));
+    $("scanLead").innerHTML=`編號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明編號是廟方系統簽發的，影印本上的編號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`;
     $("btnCam").textContent="開啟相機拍攝標籤";
   }else{
     $("scanTitle").textContent="請將標籤放進框內";
@@ -938,7 +829,6 @@ $("btnCheck").onclick=()=>{
   if(!/^[0-9A-Z]{5}-[0-9A-Z]{5}$/.test(s)||!/^[0-9a-f]{10}$/.test(t)){
     alert("格式不對：序號為 5-5 碼英數，簽章為 10 碼十六進位。");return;}
   if(hmacSha256Hex(DEMO_KEY,s).slice(0,10)!==t){showSigFail(s,t);return;}
-  if(!gateSerial(s,t))return;
   HASH_SERIAL=s;HASH_TOKEN=t;$("manualBox").style.display="none";realMode(true,true);
 };
 (function boot(){
@@ -951,27 +841,7 @@ $("btnCheck").onclick=()=>{
   const m=parseLabelCode(location.hash);
   if(m){
     if(hmacSha256Hex(DEMO_KEY,m.serial).slice(0,10)!==m.token){showSigFail(m.serial,m.token);return;}
-    if(!gateSerial(m.serial,m.token))return;
     HASH_SERIAL=m.serial;HASH_TOKEN=m.token;
-  }
-  // ?demo=live：拍攝量測那一關以模擬的正品數值呈現，讓沒有實體標籤也能走完整流程。
-  // 旗標寫在網址裡而不是本機儲存，所以換任何裝置掃這個 QR 都成立。
-  // 編號與簽章仍然實際驗算（上面已驗過），改一個字元照樣被擋下。
-  if(d==="live"){
-    if(m){SERIAL=m.serial;TOKEN=m.token;}
-    demoPass();
-    const el=$("comboTag");
-    if(el){
-      el.style.display="";
-      el.style.borderColor="#9a6b10"; el.style.background="#f8f1e0"; el.style.color="#4a3505";
-      el.innerHTML=`<details><summary style="cursor:pointer"><b>示範模式</b>　·　第 2 關（拍攝量測）為模擬結果　▾</summary>`
-        +`<div style="margin-top:6px">這個網址帶了 <code>?demo=live</code>，不需要實體標籤也能看到完整流程。`
-        +`<b>編號與數位簽章仍然是實際驗算的</b>——改動任何一個字元都會被擋下。`
-        +`實體防偽層無法在螢幕上重現，要看真正的量測請改用`
-        +`<a href="${location.pathname}${location.hash}" style="color:inherit"><b>相機實際量測</b></a>`
-        +`（需印出來的標籤）。</div></details>`;
-    }
-    return;
   }
   if(d==="pass"){demoPass();return;}
   if(d==="fail"){demoFail();return;}
