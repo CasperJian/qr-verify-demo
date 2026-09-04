@@ -285,6 +285,20 @@
       </span>
     </div>
     <div class="row">
+      <label class="f" for="fLogoSize">中央客製圖</label>
+      <select id="fLogoSize">
+        <option value="0">不放圖</option>
+        <option value="7">小（7×7 模塊）</option>
+        <option value="9" selected>中（9×9 模塊）</option>
+        <option value="11">大（11×11 模塊）</option>
+      </select>
+      <input type="file" id="fLogoFile" accept="image/*" style="font-size:.82rem">
+      <button id="btnLogoClear" class="sm" style="display:none">清除圖</button>
+      <img id="logoPrev" alt="" style="display:none;width:34px;height:34px;object-fit:cover;
+           border:1px solid var(--line);border-radius:4px">
+      <span class="hint">彩色或高飽和的圖最理想；純黑白 logo 會與碼面混淆。放圖不影響防偽層判定。</span>
+    </div>
+    <div class="row">
       <label class="f" for="fBase">驗證站網址</label>
       <input type="text" id="fBase" class="mono" style="width:min(30em,90%)" spellcheck="false">
       <span class="hint">QR 內容＝此網址＋不透明短碼。現場若要用區網示範可改這裡。</span>
@@ -315,6 +329,8 @@
             <dt>品項／批次</dt><dd id="oItem">—</dd>
             <dt>防偽層</dt><dd id="oHidden">—</dd>
             <dt>啟用狀態</dt><dd id="oStatus">—</dd>
+            <dt>中央圖</dt><dd id="oLogo">—</dd>
+            <dt>掃碼自檢</dt><dd id="oCheck">—</dd>
           </dl>
           <div class="row" style="margin-top:14px">
             <button id="btnActivate" class="sm">啟用這一批</button>
@@ -418,6 +434,7 @@
 </div>
 
 <script src="qrlib.js"></script>
+<script src="jsqr.js"></script>
 <script src="crypto.js"></script>
 <script>
 "use strict";
@@ -499,17 +516,103 @@ function migrate(){
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
 
+/* ===== 中央客製圖 =====
+   一個品牌通常只有一個 logo，因此圖檔存全域；每張標籤只記自己用多大。
+   驗證端以亮度與色度離群自動排除這塊區域，不需要知道圖形位置或形狀。 */
+const LOGO_KEY = "qrConsoleLogo/v1";
+let LOGO_IMG = null;
+function loadLogo(){
+  let d = null;
+  try{ d = localStorage.getItem(LOGO_KEY); }catch(e){}
+  if(!d) return;
+  const img = new Image();
+  img.onload = ()=>{ LOGO_IMG = img; $("logoPrev").src = d; $("logoPrev").style.display="";
+                     $("btnLogoClear").style.display=""; };
+  img.src = d;
+}
+/* 置中裁成正方形並縮到 320px，襯白底後存成 JPEG，避免塞爆 localStorage */
+function acceptLogo(file){
+  const src = new Image();
+  src.onload = ()=>{
+    const side = Math.min(src.width, src.height), out = 320;
+    const cv = document.createElement("canvas"); cv.width = cv.height = out;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,out,out);
+    ctx.drawImage(src, (src.width-side)/2, (src.height-side)/2, side, side, 0, 0, out, out);
+    const data = cv.toDataURL("image/jpeg", 0.92);
+    try{ localStorage.setItem(LOGO_KEY, data); }catch(e){ alert("圖檔太大，存不進本機瀏覽器。"); return; }
+    const img = new Image();
+    img.onload = ()=>{ LOGO_IMG = img; $("logoPrev").src = data; $("logoPrev").style.display="";
+                       $("btnLogoClear").style.display=""; redrawCurrent(); };
+    img.src = data;
+    URL.revokeObjectURL(src.src);
+  };
+  src.src = URL.createObjectURL(file);
+}
+
 /* ===== QR 繪製 ===== */
-function drawQR(cv, text, scale){
+function drawQR(cv, text, scale, logoN){
   const qr = qrcode(0,"M"); qr.addData(text); qr.make();
   const n = qr.getModuleCount(), q = 4, s = scale || 6;
   cv.width = cv.height = (n + q*2) * s;
-  const ctx = cv.getContext("2d");
+  const ctx = cv.getContext("2d", {willReadFrequently:true});
   ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,cv.width,cv.height);
   ctx.fillStyle = "#14161a";
   for(let r=0;r<n;r++)for(let c=0;c<n;c++)
     if(qr.isDark(r,c)) ctx.fillRect((q+c)*s,(q+r)*s,s,s);
+  const N = +logoN || 0;
+  if(N > 0 && LOGO_IMG){                       // 中央覆蓋 N×N 個模塊，四周留白襯底
+    const off = (q + Math.floor((n-N)/2)) * s, side = N*s, gap = Math.max(2, Math.round(s/3));
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(off-gap, off-gap, side+gap*2, side+gap*2);
+    ctx.drawImage(LOGO_IMG, off, off, side, side);
+  }
   return cv;
+}
+/* 放了圖之後還掃不掃得動——用驗證端同一支 jsQR 實際解一次，別靠猜。
+   單一解析度取樣會誤判邊界案例（同一張圖在不同取樣密度下時通時不通），
+   因此跑三種解析度：全通＝穩、部分通＝邊界、全不通＝真的蓋太多。
+   注意網址越短 QR 模塊越少，同尺寸的中央圖佔比反而越大、越容易蓋掉資料。 */
+const CHECK_SCALES = [8, 12, 20];
+function decodesAt(url, logoN, s){
+  try{
+    const cv = document.createElement("canvas");
+    drawQR(cv, url, s, logoN);
+    const d = cv.getContext("2d", {willReadFrequently:true}).getImageData(0,0,cv.width,cv.height);
+    const r = jsQR(d.data, cv.width, cv.height, {inversionAttempts:"dontInvert"});
+    return !!(r && r.data === url);
+  }catch(e){ return false; }
+}
+function qrSelfCheck(url, logoN){
+  let pass = 0;
+  for(const s of CHECK_SCALES) if(decodesAt(url, logoN, s)) pass++;
+  return {pass, total:CHECK_SCALES.length,
+          level: pass===CHECK_SCALES.length ? "ok" : (pass>0 ? "marginal" : "fail")};
+}
+/* 把目前結果面板那張重畫（換 logo 或改尺寸時用）*/
+function redrawCurrent(){
+  if(!lastBatch.length) return;
+  const f = lastBatch[0];
+  paintQRPanel(f, f.url || ($("fBase").value.trim() + "#" + f.code));
+}
+function paintQRPanel(L, url){
+  const nLogo = (L.logo != null) ? L.logo : (+$("fLogoSize").value || 0);
+  drawQR($("qrCv"), url, 6, nLogo);
+  $("qrCap").textContent = L.serial;
+  $("oSerial").textContent = L.serial;
+  $("oCode").textContent = L.code;
+  $("oUrl").textContent = url;
+  $("oItem").textContent = `${L.item}　/　${L.batch}`;
+  $("oHidden").innerHTML = maskBadges(L.layers,true) + `<span class="lyname">${maskName(L.layers)}</span>`;
+  $("oLogo").innerHTML = (nLogo>0 && LOGO_IMG) ? `${nLogo}×${nLogo} 模塊`
+                       : (nLogo>0 ? `<span class="hint">已選 ${nLogo}×${nLogo}，尚未上傳圖檔</span>` : "不放圖");
+  const ck = qrSelfCheck(url, nLogo);
+  $("oCheck").innerHTML =
+      ck.level==="ok"       ? `<span class="pill on">可正常掃描</span>　<span class="hint">${ck.pass}/${ck.total} 種解析度皆解得出</span>`
+    : ck.level==="marginal" ? `<span class="pill warn">邊界</span>　<span class="hint">${ck.pass}/${ck.total} 種解析度解得出——建議中央圖改小一級，或改用較長的驗證站網址（模塊多，圖佔比小）</span>`
+    :                         `<span class="pill bad">掃不出來</span>　<span class="hint">中央圖蓋掉太多資料，請改小一級</span>`;
+  $("lnkVerify").href = url;
+  paintStatus();
 }
 
 /* ===== 發碼 ===== */
@@ -526,6 +629,7 @@ function issue(){
   for(let i=0;i<qty;i++){
     const serial = randSerial();
     const L = mkLabel(serial, item, batch, layers, "inactive", today, 0, null);
+    L.logo = LOGO_IMG ? (+$("fLogoSize").value || 0) : 0;
     L.url = base + "#" + L.code;
     DB.labels.unshift(L);
     lastBatch.push(L);
@@ -533,16 +637,7 @@ function issue(){
   save();
 
   const f = lastBatch[0];
-  drawQR($("qrCv"), f.url, 6);
-  $("qrCap").textContent = f.serial;
-  $("oSerial").textContent = f.serial;
-  $("oCode").textContent = f.code;
-  $("oUrl").textContent = f.url;
-  $("oItem").textContent = `${f.item}　/　${f.batch}`;
-  $("oHidden").innerHTML = maskBadges(f.layers,true)
-    + `<span class="lyname">${maskName(f.layers)}</span>`;
-  $("lnkVerify").href = f.url;
-  paintStatus();
+  paintQRPanel(f, f.url);
   $("batchNote").innerHTML = qty > 1
     ? `本批共發出 <b>${qty}</b> 組，上方顯示第 1 組；完整清單見<a class="inline" href="#manage">標籤管理</a>，或匯出 CSV。
        新發出的碼預設為<b>未啟用</b>——貼標入庫確認後才啟用，避免標籤在途中流出就能通過驗證。`
@@ -589,9 +684,10 @@ function download(name, blob){
 }
 function exportCsv(){
   if(!lastBatch.length) return;
-  const head = ["序號","不透明短碼","QR內容","品項","批次","防偽層遮罩","防偽層說明","發行日"];
+  const head = ["序號","不透明短碼","QR內容","品項","批次","防偽層遮罩","防偽層說明","中央圖","發行日"];
   const rows = lastBatch.map(L=>[L.serial,L.code,L.url,L.item,L.batch,
-    normMask(L.layers),maskName(L.layers),L.issued]);
+    normMask(L.layers),maskName(L.layers),
+    (L.logo?`${L.logo}x${L.logo} 模塊`:"不放圖"),L.issued]);
   const esc = v => `"${String(v).replace(/"/g,'""')}"`;
   const csv = "﻿" + [head, ...rows].map(r=>r.map(esc).join(",")).join("\r\n");
   download(`防偽碼_${lastBatch[0].batch}_${lastBatch.length}組.csv`, new Blob([csv],{type:"text/csv;charset=utf-8"}));
@@ -694,8 +790,7 @@ $("rows").addEventListener("click", e=>{
       L.layers = m.slice(0,i) + (m[i]==="1"?"0":"1") + m.slice(i+1);
       save(); render();
       if(lastBatch.length===1 && lastBatch[0].serial===L.serial){
-        lastBatch[0].layers = L.layers;
-        $("oHidden").innerHTML = maskBadges(L.layers,true)+`<span class="lyname">${maskName(L.layers)}</span>`;
+        lastBatch[0].layers = L.layers; redrawCurrent();
       }
     }
     return;
@@ -714,18 +809,9 @@ $("rows").addEventListener("click", e=>{
   }else if(act === "open"){
     window.open(url, "_blank");
   }else if(act === "qr"){
-    drawQR($("qrCv"), url, 6);
-    $("qrCap").textContent = L.serial;
-    $("oSerial").textContent = L.serial;
-    $("oCode").textContent = L.code;
-    $("oUrl").textContent = url;
-    $("oItem").textContent = `${L.item}　/　${L.batch}`;
-    $("oHidden").innerHTML = maskBadges(L.layers,true)
-      + `<span class="lyname">${maskName(L.layers)}</span>`;
-    $("lnkVerify").href = url;
     $("batchNote").textContent = "";
     lastBatch = [Object.assign({}, L, {url})];
-    paintStatus();
+    paintQRPanel(lastBatch[0], url);
     $("issueOut").style.display = "";
     $("issueOut").scrollIntoView({block:"center"});
   }
@@ -742,9 +828,12 @@ $("btnActivate").onclick = ()=>{
 $("btnIssue").onclick = issue;
 $("btnCsv").onclick = exportCsv;
 $("btnQrPng").onclick = ()=>{
-  const cv = $("qrCv");
-  if(!cv.width) return;
-  cv.toBlob(b => download(`QR_${$("qrCap").textContent||"label"}.png`, b), "image/png");
+  if(!lastBatch.length) return;
+  const f = lastBatch[0];
+  const url = f.url || ($("fBase").value.trim() + "#" + f.code);
+  const big = document.createElement("canvas");            // 16px/模塊，可直接送印稿用
+  drawQR(big, url, 16, (f.logo!=null)?f.logo:(+$("fLogoSize").value||0));
+  big.toBlob(b => download(`QR_${f.serial}.png`, b), "image/png");
 };
 $("btnReset").onclick = ()=>{
   if(!confirm("重設示範資料？您在這裡產生的碼會一併清除。")) return;
@@ -756,7 +845,22 @@ $("btnReset").onclick = ()=>{
 });
 
 /* ===== 啟動 ===== */
+$("fLogoFile").addEventListener("change", e=>{
+  const f = e.target.files && e.target.files[0];
+  if(f) acceptLogo(f);
+});
+$("fLogoSize").addEventListener("change", ()=>{
+  if(lastBatch.length){ lastBatch[0].logo = +$("fLogoSize").value || 0; redrawCurrent(); }
+});
+$("btnLogoClear").onclick = ()=>{
+  LOGO_IMG = null;
+  try{ localStorage.removeItem(LOGO_KEY); }catch(e){}
+  $("logoPrev").style.display="none"; $("btnLogoClear").style.display="none";
+  $("fLogoFile").value = "";
+  if(lastBatch.length){ lastBatch[0].logo = 0; redrawCurrent(); }
+};
 paintIssueMask();
+loadLogo();
 $("fBase").value = defaultBase();
 $("fBatch").value = autoBatch();
 load();
