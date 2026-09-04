@@ -573,12 +573,19 @@ function drawLayers(avg,T,r,ok){
 /* 重號偵測：一物一碼的前提下，同一個編號只該被首位持有者驗證一次。
    第二次以後出現＝這個編號被複製散布（截圖、翻拍、影本），或標籤外流。
    這是後台側的防線，與隱碼那道物理防線互補。 */
+/* 計數綁在「這顆 QR」而不是只綁序號：管理台改過狀態後會重發一顆新版次的 QR，
+   那就是新的一輪，不會被上一輪的次數卡住。截圖與原圖版次相同，因此照樣抓得到重號。 */
+function scanKey(serial){
+  let n="";
+  try{ n=new URLSearchParams(location.search).get("n")||""; }catch(e){}
+  return "scan_"+serial+(n?("_"+n):"");
+}
 function scanCount(serial){
-  try{ return parseInt(localStorage.getItem("scan_"+serial)||"0",10)||0; }catch(e){ return 0; }
+  try{ return parseInt(localStorage.getItem(scanKey(serial))||"0",10)||0; }catch(e){ return 0; }
 }
 function bumpScan(serial){
   const n=scanCount(serial)+1;
-  try{ localStorage.setItem("scan_"+serial,String(n)); }catch(e){}
+  try{ localStorage.setItem(scanKey(serial),String(n)); }catch(e){}
   return n;
 }
 function showDuplicate(n){
@@ -599,7 +606,7 @@ function showDuplicate(n){
     +`<button id="btnResetScan" class="ghost">重設此編號的驗證紀錄（示範用）</button>`;
   $("btnAgain6").onclick=()=>realMode(false,true);
   $("btnResetScan").onclick=()=>{
-    try{ localStorage.removeItem("scan_"+SERIAL); }catch(e){}
+    try{ localStorage.removeItem(scanKey(SERIAL)); }catch(e){}
     location.reload();
   };
 }
@@ -683,11 +690,22 @@ function regMask(L){
   return "1111";
 }
 let URL_MASK=null;                 // 網址帶了 ?layers= 就以它為準，不被登錄覆蓋
+/* 掃碼的裝置通常查不到品牌端的標籤登錄（登錄在管理台那台機器上）。
+   因此 QR 網址可以帶 st=inactive／st=void 把狀態一起送過來。
+   只認這兩個值——狀態只能加嚴、不能放寬，所以不會變成繞過閘門的手段。 */
+function urlStatus(){
+  try{
+    const v=new URLSearchParams(location.search).get("st");
+    return (v==="inactive"||v==="void") ? v : null;
+  }catch(e){ return null; }
+}
 /* 回傳 true 表示可以繼續；false 表示已被擋下並畫出停止畫面 */
 function gateSerial(serial,token){
-  const L=registryLookup(serial);
+  const reg=registryLookup(serial);
+  const st=urlStatus();
+  const L=(reg&&reg.status!=="active") ? reg : (st ? {status:st, layers:reg?reg.layers:null} : reg);
   if(!L||L.status==="active"){
-    if(L&&URL_MASK==null)setEvalMask(regMask(L),"registry");   // 依登錄自動判定
+    if(reg&&URL_MASK==null)setEvalMask(regMask(reg),"registry");   // 依登錄自動判定
     return true;
   }
   const t=BLOCK_TXT[L.status];

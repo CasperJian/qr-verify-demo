@@ -329,6 +329,8 @@
       而標籤的登錄資料只存在產生碼的那台裝置，用另一支手機掃是查不到的。示範碼把旗標寫進 QR 網址本身，
       因此<b>換任何裝置、任何瀏覽器掃都能走完整通過流程</b>，不需要實體標籤。
       驗證頁會明確標示第 2 關為模擬結果，<b>編號與簽章仍然實際驗算</b>——改一個字元照樣被擋下。<br>
+      <b>筆電開管理台、手機掃碼</b>也成立：啟用狀態會寫進 QR 網址，後台一按停用畫面上的 QR 就重畫，
+      客戶再掃一次就會被擋下（狀態只能加嚴不能放寬）。
       關掉這個開關就是真實行為：拍螢幕過不了，要完整通過必須拿實體印出來的標籤
       （清單中的 <span class="mono">JS17C-FCHAQ</span> 就是已印出的那張）。
     </p>
@@ -338,6 +340,10 @@
         <div class="qrbox">
           <canvas id="qrCv" width="10" height="10"></canvas>
           <div class="cap" id="qrCap"></div>
+          <div id="qrFlash" style="display:none;margin-top:8px;font-size:.76rem;font-weight:700;
+               color:#9a6b10;background:#f8f1e0;border:1px solid #e0cb96;border-radius:5px;padding:5px 7px">
+            QR 已更新<br>請重新掃描
+          </div>
         </div>
         <div>
           <dl class="kv">
@@ -613,7 +619,38 @@ function redrawCurrent(){
   const f = lastBatch[0];
   paintQRPanel(f, f.url || ($("fBase").value.trim() + "#" + f.code));
 }
+/* 手機掃的是筆電螢幕上這顆 QR，而手機查不到筆電的標籤登錄。
+   因此把啟用狀態（st）與 QR 版次（n）寫進網址：
+   後台一改狀態就重畫 QR，客戶再掃一次就會看到新結果。
+   st 只認 inactive／void（只能加嚴），active 一律忽略，不會被拿來繞過。
+   版次 n 讓重號計數跟著這顆 QR 走——改過狀態後重新發出的 QR 算新的一輪。 */
+function labelUrl(L){
+  const base = ($("fBase").value.trim() || defaultBase());
+  const q = [];
+  if(L.demo) q.push("demo=live");
+  if(L.nonce) q.push("n=" + L.nonce);
+  if(L.status && L.status !== "active") q.push("st=" + L.status);
+  return base + (q.length ? (base.includes("?") ? "&" : "?") + q.join("&") : "") + "#" + L.code;
+}
+/* 狀態變動 → 換一個版次並重畫畫面上的 QR */
+function bumpLabel(L){
+  L.nonce = (L.nonce || 1) + 1;
+  L.url = labelUrl(L);
+  save();
+  if(lastBatch.length === 1 && lastBatch[0].serial === L.serial){
+    lastBatch[0] = Object.assign({}, L);
+    paintQRPanel(lastBatch[0]);
+    flashQR();
+  }
+}
+function flashQR(){
+  const el = $("qrFlash"); if(!el) return;
+  el.style.display = "";
+  clearTimeout(window.__flashT);
+  window.__flashT = setTimeout(()=>{ el.style.display = "none"; }, 6000);
+}
 function paintQRPanel(L, url){
+  url = url || labelUrl(L);
   const nLogo = (L.logo != null) ? L.logo : (+$("fLogoSize").value || 0);
   drawQR($("qrCv"), url, 6, nLogo);
   $("qrCap").textContent = L.serial;
@@ -655,7 +692,8 @@ function issue(){
                       demoCode ? "active" : "inactive", today, 0, null);
     L.logo = LOGO_IMG ? (+$("fLogoSize").value || 0) : 0;
     L.demo = demoCode;
-    L.url = base + (demoCode ? (base.includes("?") ? "&" : "?") + "demo=live" : "") + "#" + L.code;
+    L.nonce = 1;
+    L.url = labelUrl(L);
     DB.labels.unshift(L);
     lastBatch.push(L);
   }
@@ -826,11 +864,10 @@ $("rows").addEventListener("click", e=>{
   const L = DB.labels.find(x=>x.serial===serial);
   if(!L) return;
   const act = btn.dataset.act;
-  const base = $("fBase").value.trim() || defaultBase();
-  const url = L.url || (base + "#" + L.code);
+  const url = labelUrl(L);
   if(act === "toggle"){
     L.status = L.status === "active" ? "inactive" : "active";
-    save(); render();
+    bumpLabel(L); render();
   }else if(act === "open"){
     window.open(url, "_blank");
   }else if(act === "qr"){
@@ -846,7 +883,7 @@ $("btnActivate").onclick = ()=>{
   const on = lastBatch.every(L => (DB.labels.find(x=>x.serial===L.serial)||L).status === "active");
   for(const b of lastBatch){
     const L = DB.labels.find(x=>x.serial===b.serial);
-    if(L) L.status = on ? "inactive" : "active";
+    if(L){ L.status = on ? "inactive" : "active"; bumpLabel(L); }
   }
   save(); paintStatus(); render();
 };
