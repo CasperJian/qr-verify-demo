@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>防偽碼管理台 · 品牌端示範</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+TC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+  :root{
+    --paper:#f6f5f1; --card:#ffffff; --ink:#21242a; --ink-soft:#5d6370;
+    --line:#d9d6cd; --line-soft:#e8e6df; --press:#006e9e; --press-deep:#00567c;
+    --pass:#1a7f37; --pass-bg:#e9f4ec; --pass-line:#a7d5b4;
+    --fail:#c02c14; --fail-bg:#faeceb; --fail-line:#e8b3aa;
+    --warn:#9a6b10; --warn-bg:#f8f1e0; --warn-line:#e0cb96;
+    --mute:#6b7280; --mute-bg:#eeece7;
+    --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%; scroll-behavior:smooth; scroll-padding-top:64px;}
+  body{background:var(--paper); color:var(--ink); margin:0; font-size:16px; line-height:1.7;
+    font-family:"IBM Plex Sans TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;}
+  .wrap{width:min(1080px,100%); margin:0 auto; padding:0 16px 56px;}
+
+  /* 頂列 */
+  .topbar{position:sticky; top:0; z-index:20; background:rgba(246,245,241,.94);
+    backdrop-filter:blur(6px); border-bottom:1px solid var(--line);}
+  .topin{width:min(1080px,100%); margin:0 auto; padding:9px 16px; display:flex;
+    align-items:center; gap:14px; flex-wrap:wrap;}
+  .logo{display:flex; align-items:center; gap:9px; font-weight:700; font-size:.95rem;}
+  .logo svg{flex:none;}
+  .badge-demo{font-size:.7rem; font-weight:600; color:var(--warn);
+    border:1px solid var(--warn-line); background:var(--warn-bg); border-radius:99px; padding:2px 9px;}
+  nav.tabs{display:flex; gap:2px; margin-left:auto; flex-wrap:wrap;}
+  nav.tabs a{font-size:.83rem; color:var(--ink-soft); text-decoration:none;
+    padding:5px 11px; border-radius:5px;}
+  nav.tabs a:hover{background:var(--line-soft); color:var(--ink);}
+
+  .disclaim{background:var(--warn-bg); border:1px solid var(--warn-line); border-radius:8px;
+    padding:10px 14px; margin:16px 0 0; font-size:.79rem; line-height:1.65;}
+  .disclaim b{color:var(--warn);}
+
+  h1{font-size:1.5rem; margin:26px 0 6px; line-height:1.45;}
+  .lede{color:var(--ink-soft); margin:0 0 8px; max-width:56em;}
+  h2{font-size:1.08rem; margin:0 0 4px; display:flex; align-items:center; gap:9px;}
+  .secno{font-family:var(--mono); font-size:.72rem; font-weight:600; color:var(--press);
+    border:1px solid var(--press); border-radius:4px; padding:1px 7px;}
+  .seclead{color:var(--ink-soft); font-size:.87rem; margin:0 0 14px; max-width:58em;}
+  section{margin-top:38px;}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:9px; padding:18px;}
+  .card + .card{margin-top:14px;}
+
+  /* 價值卡 */
+  .cards3{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:13px;}
+  .vcard{background:var(--card); border:1px solid var(--line); border-radius:9px; padding:15px 16px;}
+  .vcard .ic{font-size:1.3rem; line-height:1;}
+  .vcard h3{margin:8px 0 5px; font-size:.94rem;}
+  .vcard p{margin:0; font-size:.83rem; color:var(--ink-soft); line-height:1.65;}
+
+  /* 表單 */
+  .row{display:flex; gap:11px; align-items:center; flex-wrap:wrap;}
+  .row + .row{margin-top:11px;}
+  label.f{font-size:.82rem; color:var(--ink-soft);}
+  input[type=text],input[type=number],select{
+    font-family:inherit; font-size:.9rem; padding:7px 10px; border:1px solid var(--line);
+    border-radius:5px; background:#fdfdfb; color:var(--ink);}
+  input[type=text].mono{font-family:var(--mono);}
+  button{font-family:inherit; font-size:.87rem; padding:7px 14px; border:1px solid var(--line);
+    border-radius:5px; background:#fdfdfb; color:var(--ink); cursor:pointer;}
+  button:hover{border-color:var(--ink-soft);}
+  button.primary{background:var(--press); border-color:var(--press); color:#fff; font-weight:600;}
+  button.primary:hover{background:var(--press-deep); border-color:var(--press-deep);}
+  button.sm{font-size:.78rem; padding:4px 9px;}
+  button:disabled{opacity:.5; cursor:default;}
+  .hint{font-size:.78rem; color:var(--ink-soft);}
+
+  /* 開關 */
+  .sw{display:inline-flex; align-items:center; gap:7px; cursor:pointer; user-select:none;}
+  .sw input{position:absolute; opacity:0; width:0; height:0;}
+  .sw i{width:34px; height:19px; border-radius:99px; background:var(--mute-bg);
+    border:1px solid var(--line); position:relative; transition:.15s; flex:none;}
+  .sw i::after{content:""; position:absolute; top:2px; left:2px; width:13px; height:13px;
+    border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25); transition:.15s;}
+  .sw input:checked + i{background:var(--pass); border-color:var(--pass);}
+  .sw input:checked + i::after{left:17px;}
+  .sw input:focus-visible + i{outline:2px solid var(--press); outline-offset:2px;}
+
+  /* 發碼結果 */
+  .issued{display:grid; grid-template-columns:auto 1fr; gap:20px; align-items:start; margin-top:16px;}
+  .qrbox{background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; text-align:center;}
+  .qrbox canvas{display:block; width:190px; height:190px; image-rendering:pixelated;}
+  .qrbox .cap{font-family:var(--mono); font-size:.72rem; color:var(--ink-soft); margin-top:8px; word-break:break-all;}
+  dl.kv{margin:0; display:grid; grid-template-columns:auto 1fr; gap:5px 14px; font-size:.86rem;}
+  dl.kv dt{color:var(--ink-soft);}
+  dl.kv dd{margin:0; font-family:var(--mono); word-break:break-all;}
+  @media(max-width:640px){ .issued{grid-template-columns:1fr;} }
+
+  /* 統計 */
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:11px; margin-bottom:14px;}
+  .stat{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:11px 13px;}
+  .stat b{display:block; font-size:1.45rem; font-family:var(--mono); line-height:1.2;}
+  .stat span{font-size:.76rem; color:var(--ink-soft);}
+
+  /* 表格 */
+  .tblwrap{overflow-x:auto; border:1px solid var(--line); border-radius:8px; background:var(--card);}
+  table{border-collapse:collapse; width:100%; font-size:.83rem; min-width:840px;}
+  th,td{padding:8px 9px; text-align:left; border-bottom:1px solid var(--line-soft); white-space:nowrap;}
+  td.wrap{white-space:normal; min-width:132px; line-height:1.45;}
+  td.wrap .mono{display:block; font-size:.78rem;}
+  th{background:#faf9f6; font-weight:600; font-size:.78rem; color:var(--ink-soft); position:sticky; top:0;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:#fbfaf7;}
+  td.mono{font-family:var(--mono);}
+  .pill{display:inline-block; font-size:.73rem; font-weight:600; padding:2px 9px; border-radius:99px; border:1px solid;}
+  .pill.on{color:var(--pass); background:var(--pass-bg); border-color:var(--pass-line);}
+  .pill.off{color:var(--mute); background:var(--mute-bg); border-color:var(--line);}
+  .pill.bad{color:var(--fail); background:var(--fail-bg); border-color:var(--fail-line);}
+  .pill.warn{color:var(--warn); background:var(--warn-bg); border-color:var(--warn-line);}
+  .acts{display:flex; gap:6px;}
+  .empty{padding:26px; text-align:center; color:var(--ink-soft); font-size:.85rem;}
+
+  /* 軌跡 */
+  .trace{display:grid; gap:0; font-size:.84rem;}
+  .tr{display:grid; grid-template-columns:auto auto 1fr auto; gap:12px; align-items:center;
+    padding:9px 2px; border-bottom:1px dashed var(--line-soft);}
+  .tr:last-child{border-bottom:none;}
+  .tr .t{font-family:var(--mono); font-size:.78rem; color:var(--ink-soft);}
+  .tr .s{font-family:var(--mono);}
+  .tr .p{color:var(--ink-soft); font-size:.8rem;}
+  .alert{border:1px solid var(--fail-line); background:var(--fail-bg); border-radius:8px;
+    padding:13px 15px; font-size:.85rem; line-height:1.65;}
+  .alert b{color:var(--fail);}
+  .alert + .alert{margin-top:10px;}
+  .ok-note{border:1px solid var(--pass-line); background:var(--pass-bg); border-radius:8px;
+    padding:13px 15px; font-size:.85rem;}
+
+  /* 流程圖 */
+  .flowbox{background:var(--card); border:1px solid var(--line); border-radius:9px; padding:6px 10px; overflow-x:auto;}
+  .flowbox svg{display:block; min-width:660px; width:100%; height:auto;}
+
+  .script{background:var(--card); border:1px solid var(--press); border-radius:9px; padding:16px 18px;}
+  .script h3{margin:0 0 9px; font-size:.94rem; color:var(--press-deep);}
+  .script ol{margin:0; padding-left:1.35em; font-size:.86rem;}
+  .script li{margin-bottom:6px;}
+  .script code{font-family:var(--mono); font-size:.85em; background:var(--line-soft); padding:1px 5px; border-radius:3px;}
+
+  footer{margin-top:52px; padding-top:14px; border-top:1px solid var(--line);
+    color:var(--ink-soft); font-size:.78rem; line-height:1.7;}
+  footer a{color:var(--ink);}
+  a.inline{color:var(--press-deep);}
+</style>
+</head>
+<body>
+
+<div class="topbar"><div class="topin">
+  <span class="logo">
+    <svg width="22" height="22" viewBox="0 0 34 34" aria-hidden="true">
+      <circle cx="17" cy="17" r="12" fill="none" stroke="#21242a" stroke-width="2"/>
+      <line x1="17" y1="0" x2="17" y2="34" stroke="#21242a" stroke-width="2"/>
+      <line x1="0" y1="17" x2="34" y2="17" stroke="#21242a" stroke-width="2"/>
+    </svg>
+    防偽碼管理台
+  </span>
+  <span class="badge-demo">示範環境</span>
+  <nav class="tabs">
+    <a href="#flow">運作流程</a>
+    <a href="#issue">發碼</a>
+    <a href="#manage">標籤管理</a>
+    <a href="#trace">驗證軌跡</a>
+    <a href="index.html">消費者驗證頁 →</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+
+<div class="disclaim">
+  <b>示範環境。</b>本頁展示品牌端的發碼與管理介面，資料存在您這台裝置的瀏覽器裡，重新整理仍在、關掉可清除，
+  <b>不是真實營運系統</b>。清單中的驗證次數、地點與時間為模擬資料；您現場產生的新碼則是真的
+  （序號、簽章與 QR 皆為實際計算，掃碼可進到驗證頁）。
+</div>
+
+<h1>從發碼、印製到現場驗證，<br>整條鏈路由品牌方自己掌握</h1>
+<p class="lede">
+  每一張標籤都有唯一序號與數位簽章，仿冒者編不出能通過後台的新號碼；
+  標籤是否啟用、印了幾張、在哪裡被驗過幾次，品牌端在這個介面上一覽無遺。
+  以下是實際的操作介面，您可以現在就產生一組新的防偽碼。
+</p>
+
+<!-- ============ 1 運作流程 ============ -->
+<section id="flow">
+  <h2><span class="secno">01</span>運作流程</h2>
+  <p class="seclead">品牌端只需要管前後兩端：發碼與看數據。中間的印製、出貨、消費者驗證都是既有流程，不改變作業方式。</p>
+
+  <div class="flowbox">
+    <svg viewBox="0 0 980 150" role="img" aria-label="流程：發碼、印製、出貨、消費者驗證、後台追蹤">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0,1 L7,4.5 L0,8 z" fill="#5d6370"/>
+        </marker>
+      </defs>
+      <g font-family="IBM Plex Sans TC, sans-serif" text-anchor="middle">
+        <g>
+          <rect x="6" y="34" width="168" height="66" rx="8" fill="#fff" stroke="#006e9e" stroke-width="2"/>
+          <text x="90" y="60" font-size="15" font-weight="700" fill="#21242a">① 後台發碼</text>
+          <text x="90" y="81" font-size="12" fill="#5d6370">唯一序號＋數位簽章</text>
+          <text x="90" y="120" font-size="11" fill="#006e9e" font-weight="600">本頁展示</text>
+        </g>
+        <line x1="180" y1="67" x2="200" y2="67" stroke="#5d6370" stroke-width="1.6" marker-end="url(#ar)"/>
+        <g>
+          <rect x="206" y="34" width="168" height="66" rx="8" fill="#fff" stroke="#d9d6cd"/>
+          <text x="290" y="60" font-size="15" font-weight="700" fill="#21242a">② 標籤印製</text>
+          <text x="290" y="81" font-size="12" fill="#5d6370">交印刷廠，含防偽層</text>
+        </g>
+        <line x1="380" y1="67" x2="400" y2="67" stroke="#5d6370" stroke-width="1.6" marker-end="url(#ar)"/>
+        <g>
+          <rect x="406" y="34" width="168" height="66" rx="8" fill="#fff" stroke="#d9d6cd"/>
+          <text x="490" y="60" font-size="15" font-weight="700" fill="#21242a">③ 貼標出貨</text>
+          <text x="490" y="81" font-size="12" fill="#5d6370">一物一碼，不重複</text>
+        </g>
+        <line x1="580" y1="67" x2="600" y2="67" stroke="#5d6370" stroke-width="1.6" marker-end="url(#ar)"/>
+        <g>
+          <rect x="606" y="34" width="168" height="66" rx="8" fill="#fff" stroke="#006e9e" stroke-width="2"/>
+          <text x="690" y="60" font-size="15" font-weight="700" fill="#21242a">④ 消費者驗證</text>
+          <text x="690" y="81" font-size="12" fill="#5d6370">手機掃碼，不裝 App</text>
+          <text x="690" y="120" font-size="11" fill="#006e9e" font-weight="600">驗證頁展示</text>
+        </g>
+        <line x1="780" y1="67" x2="800" y2="67" stroke="#5d6370" stroke-width="1.6" marker-end="url(#ar)"/>
+        <g>
+          <rect x="806" y="34" width="168" height="66" rx="8" fill="#fff" stroke="#006e9e" stroke-width="2"/>
+          <text x="890" y="60" font-size="15" font-weight="700" fill="#21242a">⑤ 後台追蹤</text>
+          <text x="890" y="81" font-size="12" fill="#5d6370">驗證軌跡與異常告警</text>
+          <text x="890" y="120" font-size="11" fill="#006e9e" font-weight="600">本頁展示</text>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="cards3" style="margin-top:14px">
+    <div class="vcard"><div class="ic">🔑</div>
+      <h3>號碼偽造不了</h3>
+      <p>序號帶數位簽章，仿冒者無法自行編出能通過後台驗證的新號碼。</p></div>
+    <div class="vcard"><div class="ic">🛡️</div>
+      <h3>影本驗不過</h3>
+      <p>標籤上另有一層印刷才有的防偽訊號，影印、翻拍、重印都會失效。</p></div>
+    <div class="vcard"><div class="ic">📈</div>
+      <h3>異常看得見</h3>
+      <p>同一序號在多地重複出現、驗證失敗率異常升高，後台立即告警。</p></div>
+  </div>
+</section>
+
+<!-- ============ 2 發碼台 ============ -->
+<section id="issue">
+  <h2><span class="secno">02</span>發碼台</h2>
+  <p class="seclead">選好品項與數量就能發出一批碼。每一組都是唯一序號加上數位簽章，可直接匯出交給印刷廠。</p>
+
+  <div class="card">
+    <div class="row">
+      <label class="f" for="fItem">品項</label>
+      <select id="fItem">
+        <option>錢母</option><option>金雞</option><option>平安符</option>
+        <option>開運手鍊</option><option>限量紀念幣</option>
+      </select>
+      <label class="f" for="fBatch">批次</label>
+      <input type="text" id="fBatch" class="mono" size="12" spellcheck="false">
+      <label class="f" for="fQty">數量</label>
+      <input type="number" id="fQty" min="1" max="50" value="5" style="width:78px">
+      <label class="sw" title="這批標籤是否以防偽層版本印製">
+        <input type="checkbox" id="fHidden" checked><i></i>
+        <span class="f" style="color:var(--ink)">開通防偽層</span>
+      </label>
+      <button id="btnIssue" class="primary">產生防偽碼</button>
+    </div>
+    <div class="row">
+      <label class="f" for="fBase">驗證站網址</label>
+      <input type="text" id="fBase" class="mono" style="width:min(30em,90%)" spellcheck="false">
+      <span class="hint">QR 內容＝此網址＋不透明短碼。現場若要用區網示範可改這裡。</span>
+    </div>
+    <p class="hint" style="margin-top:12px">
+      <b>開通防偽層</b>＝這批標籤送印時是否加上印刷才有的防偽訊號。未開通者只有數位序號與簽章：掃碼仍可查得到、
+      簽章仍然有效，但拍攝驗證那一關會判不過。實務上用在贈品、內部樣品這類不需要防偽的批次。
+    </p>
+
+    <div id="issueOut" style="display:none">
+      <div class="issued">
+        <div class="qrbox">
+          <canvas id="qrCv" width="10" height="10"></canvas>
+          <div class="cap" id="qrCap"></div>
+        </div>
+        <div>
+          <dl class="kv">
+            <dt>序號</dt><dd id="oSerial">—</dd>
+            <dt>不透明短碼</dt><dd id="oCode">—</dd>
+            <dt>QR 內容</dt><dd id="oUrl">—</dd>
+            <dt>品項／批次</dt><dd id="oItem">—</dd>
+            <dt>防偽層</dt><dd id="oHidden">—</dd>
+          </dl>
+          <div class="row" style="margin-top:14px">
+            <button id="btnQrPng" class="sm">下載這張 QR（PNG）</button>
+            <button id="btnCsv" class="sm">匯出本批 CSV（交印刷廠）</button>
+            <a id="lnkVerify" class="sm" href="#" target="_blank"
+               style="text-decoration:none"><button class="sm">開啟消費者驗證頁</button></a>
+          </div>
+          <p class="hint" id="batchNote" style="margin-top:11px"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3 標籤管理 ============ -->
+<section id="manage">
+  <h2><span class="secno">03</span>標籤管理</h2>
+  <p class="seclead">每一張標籤的啟用狀態與防偽層開通狀態都可以隨時調整。標籤遺失、批次召回、通路換約，直接在這裡停用。</p>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="row" style="margin-bottom:12px">
+    <input type="text" id="qSearch" class="mono" placeholder="搜尋序號或短碼" style="width:15em">
+    <select id="qStatus">
+      <option value="">全部狀態</option>
+      <option value="active">已啟用</option>
+      <option value="inactive">未啟用</option>
+      <option value="void">已作廢</option>
+    </select>
+    <select id="qItem"><option value="">全部品項</option></select>
+    <select id="qHidden">
+      <option value="">防偽層不限</option>
+      <option value="1">已開通</option>
+      <option value="0">未開通</option>
+    </select>
+    <button id="btnReset" class="sm" style="margin-left:auto">重設示範資料</button>
+  </div>
+
+  <div class="tblwrap">
+    <table>
+      <thead><tr>
+        <th>序號</th><th>品項</th><th>批次</th><th>防偽層</th><th>狀態</th>
+        <th>發行日</th><th>驗證次數</th><th>最後驗證</th><th>操作</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 4 驗證軌跡 ============ -->
+<section id="trace">
+  <h2><span class="secno">04</span>驗證軌跡與異常告警</h2>
+  <p class="seclead">消費者每驗一次就留下一筆紀錄。真正抓到仿冒的往往不是單次判定，而是「同一個序號在不該出現的地方一直出現」。</p>
+
+  <div id="alerts"></div>
+
+  <div class="card" style="margin-top:14px">
+    <h3 style="margin:0 0 10px; font-size:.92rem">最近驗證紀錄</h3>
+    <div class="trace" id="traceList"></div>
+  </div>
+</section>
+
+<!-- ============ 現場示範腳本 ============ -->
+<section id="script">
+  <div class="script">
+    <h3>現場示範動線（三分鐘）</h3>
+    <ol>
+      <li>在<a class="inline" href="#issue">發碼台</a>產生一組新碼 —— 序號與簽章是當場算出來的，不是預先準備好的。</li>
+      <li>用手機相機掃畫面上的 QR → 落到消費者驗證頁 → <b>第 1 關簽章通過</b>，顯示「請拍攝標籤」。</li>
+      <li>直接拍<b>螢幕上的 QR</b> → <b>第 2 關判不過</b>。螢幕沒有印刷才有的防偽層，這正是影本與翻拍會被擋下的原因。</li>
+      <li>改拍<b>實際印出來的標籤</b> → 兩關全過，解鎖產品資料。</li>
+      <li>回到<a class="inline" href="#manage">標籤管理</a>把該序號切成「未啟用」，再掃一次 → 後台立刻擋下。</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  品牌端管理示範　·　消費者端請見 <a href="index.html">驗證頁</a><br>
+  資料存於本機瀏覽器，非真實營運系統；清單中的驗證次數與地點為模擬資料。<br>
+  正式導入時，發碼、金鑰與判定皆移至伺服器端，並串接既有的 ERP／出貨系統。
+</footer>
+</div>
+
+<script src="qrlib.js"></script>
+<script src="crypto.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const KEY = "qrConsoleDemo/v1";
+
+/* ===== 驗證站網址：預設指向同目錄的消費者驗證頁（絕對路徑，手機掃得到）===== */
+function defaultBase(){
+  const u = new URL(location.href);
+  u.hash = ""; u.search = "";
+  u.pathname = u.pathname.replace(/[^/]*$/, "index.html");
+  return u.href;
+}
+
+/* ===== 示範資料 ===== */
+const ITEMS = ["錢母","金雞","平安符","開運手鍊","限量紀念幣"];
+const PLACES = ["台北 · 中山","台中 · 西屯","高雄 · 左營","新竹 · 東區","台南 · 中西","桃園 · 中壢","線上通路"];
+function mkLabel(serial, item, batch, hidden, status, issued, scans, last){
+  const token = hmacSha256Hex(DEMO_KEY, serial);
+  return {serial, code: packCode(serial, token.slice(0,10)), item, batch, hidden, status, issued, scans, last};
+}
+function seed(){
+  const L = [
+    // 這一組是實際已印出來的測試標籤，現場可以拿實體來掃
+    mkLabel("JS17C-FCHAQ","錢母","B2608-A",true,"active","2026-08-24",37,{t:"2026-09-03 14:22",p:"台北 · 中山",r:"pass"}),
+    mkLabel("4KT2M-9WPX7","錢母","B2608-A",true,"active","2026-08-24",12,{t:"2026-09-03 11:05",p:"台中 · 西屯",r:"pass"}),
+    mkLabel("QB6HN-3ZR5D","金雞","B2608-A",true,"active","2026-08-24",8,{t:"2026-09-02 18:40",p:"高雄 · 左營",r:"pass"}),
+    mkLabel("7XKD2-M4NBQ","金雞","B2608-B",true,"active","2026-08-28",3,{t:"2026-09-01 09:15",p:"新竹 · 東區",r:"pass"}),
+    mkLabel("H3M8P-VR2TC","平安符","B2609-A",true,"inactive","2026-09-02",0,null),
+    mkLabel("N5WQ7-KD4XJ","平安符","B2609-A",true,"inactive","2026-09-02",0,null),
+    mkLabel("T9BR4-2HFMS","開運手鍊","B2607-S",false,"active","2026-07-30",5,{t:"2026-08-29 16:02",p:"線上通路",r:"hold"}),
+    mkLabel("V2CJ6-8PQWN","限量紀念幣","B2606-X",true,"void","2026-06-18",21,{t:"2026-08-11 13:47",p:"桃園 · 中壢",r:"fail"}),
+  ];
+  const E = [
+    {t:"2026-09-03 14:22", s:"JS17C-FCHAQ", p:"台北 · 中山", r:"pass"},
+    {t:"2026-09-03 11:05", s:"4KT2M-9WPX7", p:"台中 · 西屯", r:"pass"},
+    {t:"2026-09-02 18:40", s:"QB6HN-3ZR5D", p:"高雄 · 左營", r:"pass"},
+    {t:"2026-09-02 15:31", s:"V2CJ6-8PQWN", p:"台南 · 中西", r:"fail"},
+    {t:"2026-09-02 15:12", s:"V2CJ6-8PQWN", p:"高雄 · 左營", r:"fail"},
+    {t:"2026-09-02 14:58", s:"V2CJ6-8PQWN", p:"桃園 · 中壢", r:"fail"},
+    {t:"2026-09-01 09:15", s:"7XKD2-M4NBQ", p:"新竹 · 東區", r:"pass"},
+    {t:"2026-08-29 16:02", s:"T9BR4-2HFMS", p:"線上通路",   r:"hold"},
+  ];
+  return {labels:L, events:E};
+}
+let DB = null;
+function load(){
+  try{ const raw = localStorage.getItem(KEY); if(raw){ DB = JSON.parse(raw); return; } }catch(e){}
+  DB = seed(); save();
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
+
+/* ===== QR 繪製 ===== */
+function drawQR(cv, text, scale){
+  const qr = qrcode(0,"M"); qr.addData(text); qr.make();
+  const n = qr.getModuleCount(), q = 4, s = scale || 6;
+  cv.width = cv.height = (n + q*2) * s;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.fillStyle = "#14161a";
+  for(let r=0;r<n;r++)for(let c=0;c<n;c++)
+    if(qr.isDark(r,c)) ctx.fillRect((q+c)*s,(q+r)*s,s,s);
+  return cv;
+}
+
+/* ===== 發碼 ===== */
+let lastBatch = [];
+function issue(){
+  const item = $("fItem").value;
+  const batch = $("fBatch").value.trim() || autoBatch();
+  const qty = Math.max(1, Math.min(50, +$("fQty").value || 1));
+  const hidden = $("fHidden").checked;
+  const base = $("fBase").value.trim() || defaultBase();
+  const today = new Date().toISOString().slice(0,10);
+
+  lastBatch = [];
+  for(let i=0;i<qty;i++){
+    const serial = randSerial();
+    const L = mkLabel(serial, item, batch, hidden, "inactive", today, 0, null);
+    L.url = base + "#" + L.code;
+    DB.labels.unshift(L);
+    lastBatch.push(L);
+  }
+  save();
+
+  const f = lastBatch[0];
+  drawQR($("qrCv"), f.url, 6);
+  $("qrCap").textContent = f.serial;
+  $("oSerial").textContent = f.serial;
+  $("oCode").textContent = f.code;
+  $("oUrl").textContent = f.url;
+  $("oItem").textContent = `${f.item}　/　${f.batch}`;
+  $("oHidden").innerHTML = f.hidden
+    ? `<span class="pill on">已開通</span>`
+    : `<span class="pill off">未開通（僅數位序號）</span>`;
+  $("lnkVerify").href = f.url;
+  $("batchNote").innerHTML = qty > 1
+    ? `本批共發出 <b>${qty}</b> 組，上方顯示第 1 組；完整清單見<a class="inline" href="#manage">標籤管理</a>，或匯出 CSV。
+       新發出的碼預設為<b>未啟用</b>——貼標入庫確認後才啟用，避免標籤在途中流出就能通過驗證。`
+    : `新發出的碼預設為<b>未啟用</b>——貼標入庫確認後才啟用，避免標籤在途中流出就能通過驗證。`;
+  $("issueOut").style.display = "";
+  render();
+}
+function autoBatch(){
+  const d = new Date();
+  return `B${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,"0")}-N`;
+}
+
+/* ===== 下載 ===== */
+function download(name, blob){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function exportCsv(){
+  if(!lastBatch.length) return;
+  const head = ["序號","不透明短碼","QR內容","品項","批次","防偽層","發行日"];
+  const rows = lastBatch.map(L=>[L.serial,L.code,L.url,L.item,L.batch,L.hidden?"已開通":"未開通",L.issued]);
+  const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+  const csv = "﻿" + [head, ...rows].map(r=>r.map(esc).join(",")).join("\r\n");
+  download(`防偽碼_${lastBatch[0].batch}_${lastBatch.length}組.csv`, new Blob([csv],{type:"text/csv;charset=utf-8"}));
+}
+
+/* ===== 表格 ===== */
+const STATUS = {
+  active:  {t:"已啟用", c:"on"},
+  inactive:{t:"未啟用", c:"off"},
+  void:    {t:"已作廢", c:"bad"},
+};
+const RESULT = {pass:{t:"通過",c:"on"}, fail:{t:"未通過",c:"bad"}, hold:{t:"待確認",c:"warn"}};
+
+function filtered(){
+  const q = $("qSearch").value.trim().toUpperCase();
+  const st = $("qStatus").value, it = $("qItem").value, hd = $("qHidden").value;
+  return DB.labels.filter(L=>{
+    if(q && !(L.serial.includes(q) || L.code.includes(q))) return false;
+    if(st && L.status !== st) return false;
+    if(it && L.item !== it) return false;
+    if(hd && String(L.hidden?1:0) !== hd) return false;
+    return true;
+  });
+}
+function render(){
+  // 統計
+  const all = DB.labels;
+  const n = s => all.filter(L=>L.status===s).length;
+  const scans = all.reduce((a,L)=>a+(L.scans||0),0);
+  $("stats").innerHTML = [
+    [all.length,"已發行標籤"],
+    [n("active"),"已啟用"],
+    [n("inactive"),"未啟用"],
+    [all.filter(L=>L.hidden).length,"防偽層已開通"],
+    [scans,"累計驗證次數"],
+  ].map(([v,t])=>`<div class="stat"><b>${v}</b><span>${t}</span></div>`).join("");
+
+  // 品項下拉
+  const sel = $("qItem"), cur = sel.value;
+  const items = [...new Set(all.map(L=>L.item))];
+  sel.innerHTML = `<option value="">全部品項</option>` + items.map(i=>`<option${i===cur?" selected":""}>${i}</option>`).join("");
+
+  // 列
+  const base = $("fBase").value.trim() || defaultBase();
+  const rows = filtered();
+  $("rows").innerHTML = rows.length ? rows.map(L=>{
+    const st = STATUS[L.status], last = L.last;
+    return `<tr data-s="${L.serial}">
+      <td class="mono">${L.serial}</td>
+      <td>${L.item}</td>
+      <td class="mono">${L.batch}</td>
+      <td><label class="sw"><input type="checkbox" data-act="hidden" ${L.hidden?"checked":""}><i></i>
+          <span class="pill ${L.hidden?"on":"off"}">${L.hidden?"已開通":"未開通"}</span></label></td>
+      <td><span class="pill ${st.c}">${st.t}</span></td>
+      <td class="mono">${L.issued}</td>
+      <td class="mono">${L.scans||0}</td>
+      <td class="wrap">${last ? `<span class="mono">${last.t}</span>${last.p}　<span class="pill ${RESULT[last.r].c}">${RESULT[last.r].t}</span>` : `<span class="hint">尚未驗證</span>`}</td>
+      <td><div class="acts">
+        <button class="sm" data-act="toggle">${L.status==="active"?"停用":"啟用"}</button>
+        <button class="sm" data-act="qr">QR</button>
+        <button class="sm" data-act="open">驗證</button>
+      </div></td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="9" class="empty">沒有符合條件的標籤。</td></tr>`;
+
+  // 軌跡
+  $("traceList").innerHTML = DB.events.slice(0,12).map(e=>`
+    <div class="tr"><span class="t">${e.t}</span><span class="s">${e.s}</span>
+      <span class="p">${e.p}</span><span class="pill ${RESULT[e.r].c}">${RESULT[e.r].t}</span></div>`).join("");
+
+  // 告警：同一序號在短時間內多地驗證
+  const bySerial = {};
+  for(const e of DB.events){ (bySerial[e.s] = bySerial[e.s] || []).push(e); }
+  const dup = Object.entries(bySerial)
+    .map(([s, es]) => [s, new Set(es.map(e=>e.p)).size, es.length])
+    .filter(([,places, cnt]) => places >= 3 && cnt >= 3);
+  $("alerts").innerHTML = dup.length
+    ? dup.map(([s,places,cnt])=>`<div class="alert">
+        <b>⚠ 疑似複製：序號 ${s}</b><br>
+        同一序號在 <b>${places}</b> 個不同地點被驗證 <b>${cnt}</b> 次。一物一碼的前提下，這只有兩種可能：
+        標籤被整批複製，或該序號外流。建議立即將此序號<b>作廢</b>並回查出貨通路。
+      </div>`).join("")
+    : `<div class="ok-note">目前沒有重號或異常密集驗證的紀錄。</div>`;
+
+  // 網址欄更新後，QR 內容也要跟上
+  void base;
+}
+
+/* ===== 互動 ===== */
+$("rows").addEventListener("click", e=>{
+  const btn = e.target.closest("button[data-act]");
+  if(!btn) return;
+  const serial = btn.closest("tr").dataset.s;
+  const L = DB.labels.find(x=>x.serial===serial);
+  if(!L) return;
+  const act = btn.dataset.act;
+  const base = $("fBase").value.trim() || defaultBase();
+  const url = L.url || (base + "#" + L.code);
+  if(act === "toggle"){
+    L.status = L.status === "active" ? "inactive" : "active";
+    save(); render();
+  }else if(act === "open"){
+    window.open(url, "_blank");
+  }else if(act === "qr"){
+    drawQR($("qrCv"), url, 6);
+    $("qrCap").textContent = L.serial;
+    $("oSerial").textContent = L.serial;
+    $("oCode").textContent = L.code;
+    $("oUrl").textContent = url;
+    $("oItem").textContent = `${L.item}　/　${L.batch}`;
+    $("oHidden").innerHTML = L.hidden ? `<span class="pill on">已開通</span>`
+                                      : `<span class="pill off">未開通（僅數位序號）</span>`;
+    $("lnkVerify").href = url;
+    $("batchNote").textContent = "";
+    lastBatch = [Object.assign({}, L, {url})];
+    $("issueOut").style.display = "";
+    $("issueOut").scrollIntoView({block:"center"});
+  }
+});
+$("rows").addEventListener("change", e=>{
+  const box = e.target.closest('input[data-act="hidden"]');
+  if(!box) return;
+  const L = DB.labels.find(x=>x.serial === box.closest("tr").dataset.s);
+  if(L){ L.hidden = box.checked; save(); render(); }
+});
+$("btnIssue").onclick = issue;
+$("btnCsv").onclick = exportCsv;
+$("btnQrPng").onclick = ()=>{
+  const cv = $("qrCv");
+  if(!cv.width) return;
+  cv.toBlob(b => download(`QR_${$("qrCap").textContent||"label"}.png`, b), "image/png");
+};
+$("btnReset").onclick = ()=>{
+  if(!confirm("重設示範資料？您在這裡產生的碼會一併清除。")) return;
+  DB = seed(); save(); $("issueOut").style.display="none"; render();
+};
+["qSearch","qStatus","qItem","qHidden"].forEach(id=>{
+  $(id).addEventListener("input", render);
+  $(id).addEventListener("change", render);
+});
+
+/* ===== 啟動 ===== */
+$("fBase").value = defaultBase();
+$("fBatch").value = autoBatch();
+load();
+render();
+</script>
+</body>
+</html>

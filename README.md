@@ -5,7 +5,17 @@
 
 這是防偽驗證端的**概念驗證示範站**，重點在驗證邏輯與威脅模型的設計。
 
-👉 **[開啟示範站](https://casperjian.github.io/qr-verify-demo/)**
+👉 **[消費者驗證頁](https://casperjian.github.io/qr-verify-demo/)**　·　**[品牌端管理台](https://casperjian.github.io/qr-verify-demo/console.html)**
+
+## 兩個介面
+
+| 介面 | 給誰用 | 內容 |
+|---|---|---|
+| [消費者驗證頁](https://casperjian.github.io/qr-verify-demo/) | 末端消費者 | 掃碼落地 → 驗簽 → 拍攝標籤 → 判定真偽 |
+| [品牌端管理台](https://casperjian.github.io/qr-verify-demo/console.html) | 品牌／通路管理者 | 發碼（可當場產生）、標籤啟用與防偽層開通狀態、驗證軌跡與重號告警 |
+
+管理台是**介面示範**：資料存在瀏覽器本機、清單中的驗證次數與地點為模擬資料，
+但現場產生的新碼是真的——序號、HMAC 簽章與 QR 皆為實際計算，掃碼可直接進到驗證頁。
 
 ## 威脅模型
 
