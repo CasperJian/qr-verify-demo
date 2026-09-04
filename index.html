@@ -227,7 +227,7 @@
       </table>
       <p class="note" id="dbgMeta" style="margin-top:8px"></p>
       <p class="note">通過規則：納入判定的層方向全部正確，且僅允許一層分離量未達門檻。門檻請用「實印正品 vs 自製仿品」實測校定（存於本機瀏覽器）。</p>
-      <p class="note" style="margin-top:10px"><b>實驗用：只判定選定的層。</b>標籤若刻意只帶部分隱碼層，未帶碼的層在這裡只能亂猜，會把總判定拖成 HOLD／FAIL。做層組合實印實驗時，把該張沒帶碼的層取消勾選，判定就只看實際帶碼的層。<b>正式驗證必須保持四層全勾</b>（預設值）。</p>
+      <p class="note" style="margin-top:10px"><b>實驗用：只判定選定的層。</b>標籤若刻意只帶部分隱碼層，未帶碼的層在這裡只能亂猜，會把總判定拖成 HOLD／FAIL。做層組合實印實驗時，把該張沒帶碼的層取消勾選，判定就只看實際帶碼的層。只要不是四層全勾，頁面頂端就會出現紅色警示。<b>正式驗證必須保持四層全勾</b>；這個設定<b>不會被記住</b>——重新整理即回到四層全判。</p>
       <div class="btnrow" id="evalMaskBox" style="gap:14px">
         <label><input type="checkbox" data-k="DA" checked> ①深 a*</label>
         <label><input type="checkbox" data-k="DB" checked> ②深 b*</label>
@@ -421,10 +421,37 @@ const LAYERS=[
    縮減後，未納入的層完全不參與符號一致率與強度統計（否則亂猜的層會拖垮判定）。 */
 let EVAL_MASK="1111";
 function activeLayers(){return LAYERS.filter((L,i)=>EVAL_MASK[i]==="1");}
-function loadEvalMask(){
-  try{const v=localStorage.getItem("evalMask");if(/^[01]{4}$/.test(v||""))EVAL_MASK=v;}catch(e){}
+function syncEvalBoxes(){
   document.querySelectorAll("#evalMaskBox input").forEach(i=>{
     i.checked=EVAL_MASK[LAYERS.findIndex(L=>L.k===i.dataset.k)]==="1";});
+}
+/* 縮減判定層是實驗工具，刻意「不留痕跡」：
+   只在本次載入有效，重新整理就回到四層全判。
+   之前的版本把它存進 localStorage 又不顯示任何警示——殘留一組 0000 就會讓
+   任何真標籤都判不過，外觀跟演算法失效一模一樣。這裡順手清掉舊的殘留值。 */
+try{ localStorage.removeItem("evalMask"); }catch(e){}
+function setEvalMask(v){
+  let m=normLayerMask(v), note="";
+  if(m==="0000"){            // 一條層都不判＝根本沒有驗證，退回四層才有意義
+    m="1111";
+    note="此組合本身不帶隱碼，已改回四層判定——<b>判不過才是正確結果</b>（對照組）。";
+  }
+  EVAL_MASK=m; syncEvalBoxes(); paintEvalBanner(note);
+}
+/* 只要判定層不是四層全開，就一定顯示警示，不管是網址參數還是手動勾選 */
+function paintEvalBanner(note){
+  const el=$("comboTag"); if(!el)return;
+  if(EVAL_MASK==="1111"&&!note){ el.style.display="none"; el.innerHTML=""; return; }
+  const on=LAYERS.filter((L,i)=>EVAL_MASK[i]==="1").map(L=>L.name).join("、")||"（無）";
+  el.style.display="";
+  el.innerHTML=(EVAL_MASK==="1111"
+      ?`<b>⚠ 實驗網址</b><br>${note}`
+      :`<b>⚠ 實驗模式，不是正式驗證：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
+       +`這一頁只判定 ${on}，其餘層不計入，因此<b>判定結果不代表這張標籤是真品</b>。`
+       +(note?`<br>${note}`:""))
+    +`<br><button id="btnFullEval" style="margin-top:7px">恢復四層全判</button>`;
+  const b=$("btnFullEval");
+  if(b)b.onclick=()=>{ setEvalMask("1111"); if(lastAvg)$("btnReeval").click(); };
 }
 function loadT(){
   const o={};for(const L of LAYERS)o[L.k]=L.defT;
@@ -742,12 +769,11 @@ function fillDebug(avg,T,r){
     +` · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`;
 }
 document.querySelectorAll("#evalMaskBox input").forEach(i=>i.addEventListener("change",()=>{
-  EVAL_MASK=LAYERS.map(L=>
+  const picked=LAYERS.map(L=>
     document.querySelector(`#evalMaskBox input[data-k="${L.k}"]`).checked?"1":"0").join("");
-  try{localStorage.setItem("evalMask",EVAL_MASK);}catch(e){}
+  setEvalMask(picked);                    // 不寫入 localStorage，重新整理即復原
   if(lastAvg)$("btnReeval").click();
 }));
-loadEvalMask();
 $("btnReeval").onclick=()=>{
   if(!lastAvg)return;
   const T={};
@@ -840,18 +866,7 @@ $("btnCheck").onclick=()=>{
   // ?layers=1010 → 這一頁只判定指定的層（層組合實印實驗用）。
   // 只作用於本次載入，不覆寫校定面板存在 localStorage 的預設值。
   const ql=q.get("layers");
-  if(ql!=null){
-    EVAL_MASK=normLayerMask(ql);
-    document.querySelectorAll("#evalMaskBox input").forEach(i=>{
-      i.checked=EVAL_MASK[LAYERS.findIndex(L=>L.k===i.dataset.k)]==="1";});
-    const on=LAYERS.filter((L,i)=>EVAL_MASK[i]==="1").map(L=>L.name).join("、")||"（無）";
-    $("comboTag").style.display="";
-    $("comboTag").innerHTML=`<b>⚠ 實驗模式，不是正式驗證：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
-      +`這一頁只判定 ${on}，其餘層不計入，因此<b>判定結果不代表這張標籤是真品</b>。`
-      +(EVAL_MASK==="0000"?"<br>此組合本來就沒有隱碼，判不過才是正確結果——它是對照組。":"")
-      +`<br>正式驗證請用不帶 <code>?layers</code> 參數的網址：`
-      +`<a href="${location.pathname}${location.hash}" style="color:inherit">點此重新以四層判定</a>`;
-  }
+  if(ql!=null)setEvalMask(ql);
   const d=q.get("demo");
   const m=parseLabelCode(location.hash);
   if(m){
