@@ -222,8 +222,8 @@
     <summary>量測明細與門檻校定（實印現場用）</summary>
     <div class="inner2">
       <table class="dbg">
-        <thead><tr><th>隱碼層</th><th>分離量</th><th>方向</th><th>門檻</th><th>判定</th></tr></thead>
-        <tbody id="dbgRows"><tr><td colspan="5" class="note">尚無量測資料。</td></tr></tbody>
+        <thead><tr><th>隱碼層</th><th>分離量</th><th>符號一致</th><th>方向</th><th>門檻</th><th>判定</th></tr></thead>
+        <tbody id="dbgRows"><tr><td colspan="6" class="note">尚無量測資料。</td></tr></tbody>
       </table>
       <p class="note" id="dbgMeta" style="margin-top:8px"></p>
       <p class="note">通過規則：納入判定的層方向全部正確，且僅允許一層分離量未達門檻。門檻請用「實印正品 vs 自製仿品」實測校定（存於本機瀏覽器）。</p>
@@ -399,13 +399,16 @@ function measureFrame(img,W,H,corners,count,token){
    仿品訊號被抹除後只能亂猜 → 期望值 0.5；正品即使強度衰減大半仍接近 1。 */
 function agreement(m){
   if(!m||!m.cells)return null;
+  // 四層一律全部分析並回報；遮罩只決定哪幾層計入總一致率與判定。
+  const act=activeLayers().map(L=>L.k);
   let valid=0,correct=0;const per={};
-  for(const L of activeLayers()){
+  for(const L of LAYERS){
     const cs=m.cells[L.k]||[];
     let v=0,c=0;
     for(const x of cs){if(x==null||!Number.isFinite(x))continue;v++;if(x>0)c++;}
-    per[L.k]={valid:v,correct:c,rate:v?c/v:null};
-    valid+=v;correct+=c;
+    const counted=act.includes(L.k);
+    per[L.k]={valid:v,correct:c,rate:v?c/v:null,counted};
+    if(counted){valid+=v;correct+=c;}
   }
   return valid?{valid,correct,rate:correct/valid,per}:null;
 }
@@ -430,28 +433,42 @@ function syncEvalBoxes(){
    之前的版本把它存進 localStorage 又不顯示任何警示——殘留一組 0000 就會讓
    任何真標籤都判不過，外觀跟演算法失效一模一樣。這裡順手清掉舊的殘留值。 */
 try{ localStorage.removeItem("evalMask"); }catch(e){}
-function setEvalMask(v){
-  let m=normLayerMask(v), note="";
+/* source：
+   "registry" ＝ 依標籤在品牌端登錄的防偽層自動判定（正常運作，中性提示）
+   "url"/"manual" ＝ 人為縮減判定範圍（實驗，紅色警示） */
+function setEvalMask(v,source){
+  let m=normLayerMask(v), note="", reg=(source==="registry");
   if(m==="0000"){            // 一條層都不判＝根本沒有驗證，退回四層才有意義
     m="1111";
-    note="此組合本身不帶隱碼，已改回四層判定——<b>判不過才是正確結果</b>（對照組）。";
+    note=reg
+      ?"這張標籤登錄為<b>未開通防偽層</b>，只有數位編號與簽章。拍攝這關本來就過不了——這是設定，不是故障。"
+      :"此組合本身不帶隱碼，已改回四層判定——<b>判不過才是正確結果</b>（對照組）。";
   }
-  EVAL_MASK=m; syncEvalBoxes(); paintEvalBanner(note);
+  EVAL_MASK=m; syncEvalBoxes(); paintEvalBanner(note,reg?"info":"warn");
 }
-/* 只要判定層不是四層全開，就一定顯示警示，不管是網址參數還是手動勾選 */
-function paintEvalBanner(note){
+/* 只要判定範圍不是四層全開，就一定顯示提示，不管來源為何 */
+function paintEvalBanner(note,kind){
   const el=$("comboTag"); if(!el)return;
   if(EVAL_MASK==="1111"&&!note){ el.style.display="none"; el.innerHTML=""; return; }
   const on=LAYERS.filter((L,i)=>EVAL_MASK[i]==="1").map(L=>L.name).join("、")||"（無）";
+  const info=(kind==="info");
   el.style.display="";
-  el.innerHTML=(EVAL_MASK==="1111"
-      ?`<b>⚠ 實驗網址</b><br>${note}`
-      :`<b>⚠ 實驗模式，不是正式驗證：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
-       +`這一頁只判定 ${on}，其餘層不計入，因此<b>判定結果不代表這張標籤是真品</b>。`
-       +(note?`<br>${note}`:""))
-    +`<br><button id="btnFullEval" style="margin-top:7px">恢復四層全判</button>`;
+  el.style.borderColor=info?"#006e9e":"#b3261e";
+  el.style.background =info?"#eaf3f8":"#fdecea";
+  el.style.color      =info?"#123d52":"#5f1512";
+  el.innerHTML=(info
+      ?`<b>依標籤登錄判定：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
+       +(EVAL_MASK==="1111"?"":`品牌端記載這張標籤只印了 ${on}，因此<b>只用這些層判定</b>；`
+         +`其餘層仍會量測並列在下方分析中，但不計入結果。`)
+       +(note?`${EVAL_MASK==="1111"?"":"<br>"}${note}`:"")
+      :(EVAL_MASK==="1111"
+        ?`<b>⚠ 實驗網址</b><br>${note}`
+        :`<b>⚠ 實驗模式，不是正式驗證：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
+         +`這一頁只判定 ${on}，其餘層不計入，因此<b>判定結果不代表這張標籤是真品</b>。`
+         +(note?`<br>${note}`:"")))
+    +(info?"":`<br><button id="btnFullEval" style="margin-top:7px">恢復四層全判</button>`);
   const b=$("btnFullEval");
-  if(b)b.onclick=()=>{ setEvalMask("1111"); if(lastAvg)$("btnReeval").click(); };
+  if(b)b.onclick=()=>{ setEvalMask("1111","manual"); if(lastAvg)$("btnReeval").click(); };
 }
 function loadT(){
   const o={};for(const L of LAYERS)o[L.k]=L.defT;
@@ -543,10 +560,13 @@ function drawLayers(avg,T,r,ok){
     const good=inEval&&v>0&&v>=th;
     const pct=Math.max(0,Math.min(100,(v/(th*2.5))*100));
     const thPct=Math.min(100,(th/(th*2.5))*100);
+    const p=r&&r.agreeInfo?r.agreeInfo.per[L.k]:null;
+    const pTxt=p&&p.rate!=null?`符號 ${p.correct}/${p.valid}（${Math.round(p.rate*100)}%）`:"符號 –";
     return`<div class="lrow">
-      <span class="nm">${L.name}${inEval?"":"　<small>（實驗：不計入）</small>"}</span>
+      <span class="nm">${L.name}${inEval?"":`　<small>（不計入判定）</small>`}</span>
       <span class="vl ${good?'lyOK':'lyNG'}">${Number.isFinite(v)?v.toFixed(2):"–"}</span>
       <span class="lbar ${good?'':'no'}"><i style="width:${pct}%"></i><span class="th" style="left:${thPct}%"></span></span>
+      <span class="nm" style="grid-column:1/-1;font-size:.72rem">${pTxt}　·　門檻 ${th}　·　${inEval?"計入判定":"此標籤未登錄本層，僅供參考"}</span>
     </div>`;
   }).join("");
   $("layerFoot").innerHTML=ok
@@ -625,11 +645,23 @@ const BLOCK_TXT={
   void:{h:"此編號已作廢",
     p:"編號與簽章都正確，但品牌端已將這張標籤<b>註銷</b>（召回、報廢或確認外流）。驗證到此停止。"},
 };
+/* 這張標籤登錄了哪幾層防偽層（相容舊版的 hidden 布林值） */
+function regMask(L){
+  if(!L)return null;
+  if(typeof L.layers==="string"&&/^[01]{4}$/.test(L.layers))return L.layers;
+  if(L.hidden===false)return "0000";
+  return "1111";
+}
+let URL_MASK=null;                 // 網址帶了 ?layers= 就以它為準，不被登錄覆蓋
 /* 回傳 true 表示可以繼續；false 表示已被擋下並畫出停止畫面 */
 function gateSerial(serial,token){
   const L=registryLookup(serial);
-  if(!L||L.status==="active")return true;
-  const t=BLOCK_TXT[L.status]; if(!t)return true;
+  if(!L||L.status==="active"){
+    if(L&&URL_MASK==null)setEvalMask(regMask(L),"registry");   // 依登錄自動判定
+    return true;
+  }
+  const t=BLOCK_TXT[L.status];
+  if(!t){ if(URL_MASK==null)setEvalMask(regMask(L),"registry"); return true; }
   stopStream(); hideAll();
   SERIAL=serial;TOKEN=token;
   $("banner").innerHTML=`<div class="banner no">
@@ -750,13 +782,17 @@ function finishCam(){
 
 /* ===== 除錯面板 ===== */
 function fillDebug(avg,T,r){
-  const actK=activeLayers().map(L=>L.k);
+  const actK=activeLayers().map(L=>L.k), ai0=r&&r.agreeInfo;
   $("dbgRows").innerHTML=LAYERS.map(L=>{
     const v=avg?avg[L.k]:NaN, inEval=actK.includes(L.k), ok=inEval&&v>0&&v>=T[L.k];
-    return`<tr><td>${L.name}${inEval?"":"　（不計入）"}</td><td><b>${Number.isFinite(v)?v.toFixed(2):"–"}</b></td>
+    const p=ai0?ai0.per[L.k]:null;
+    const pTxt=p&&p.rate!=null?`${p.correct}/${p.valid}　${Math.round(p.rate*100)}%`:"–";
+    return`<tr${inEval?"":' style="opacity:.62"'}><td>${L.name}${inEval?"":"　（不計入）"}</td>
+      <td><b>${Number.isFinite(v)?v.toFixed(2):"–"}</b></td>
+      <td>${pTxt}</td>
       <td class="${v>0?'lyOK':'lyNG'}">${v>0?"正確":"錯誤"}</td>
       <td><input data-k="${L.k}" value="${T[L.k]}"></td>
-      <td class="${ok?'lyOK':'lyNG'}">${ok?"過":"未過"}</td></tr>`;
+      <td class="${ok?'lyOK':'lyNG'}">${inEval?(ok?"過":"未過"):"—"}</td></tr>`;
   }).join("");
   const ai=r&&r.agreeInfo;
   const perTxt=ai?LAYERS.map(L=>{const p=ai.per[L.k];return p&&p.rate!=null?`${p.correct}/${p.valid}`:"–";}).join(" "):"–";
@@ -771,7 +807,8 @@ function fillDebug(avg,T,r){
 document.querySelectorAll("#evalMaskBox input").forEach(i=>i.addEventListener("change",()=>{
   const picked=LAYERS.map(L=>
     document.querySelector(`#evalMaskBox input[data-k="${L.k}"]`).checked?"1":"0").join("");
-  setEvalMask(picked);                    // 不寫入 localStorage，重新整理即復原
+  URL_MASK=picked;                        // 人工指定後就不再被標籤登錄覆蓋
+  setEvalMask(picked,"manual");           // 不寫入 localStorage，重新整理即復原
   if(lastAvg)$("btnReeval").click();
 }));
 $("btnReeval").onclick=()=>{
@@ -831,11 +868,13 @@ function realMode(useHash,autoStart){
   $("btnShot").style.display="none";
   if(SERIAL){
     $("scanTitle").textContent="第 2 步：拍攝標籤";
-    const reg=registryLookup(SERIAL);
+    const rm=regMask(registryLookup(SERIAL));
     $("scanLead").innerHTML=`編號 <b>${SERIAL}</b> 已通過簽章檢查——但這只證明編號是廟方系統簽發的，影印本上的編號也一樣有效。請<b>用本頁相機拍攝同一張標籤</b>，量測藏在碼面裡的四條隱碼。`
-      +(reg&&reg.hidden===false
-        ?`<br><br><b>注意：</b>品牌端記載這批標籤<b>未開通防偽層</b>，只有數位編號與簽章。拍攝這一關本來就過不了——這是設定，不是故障。`
-        :"");
+      +(rm==="0000"
+        ?`<br><br><b>注意：</b>品牌端記載這張標籤<b>未開通防偽層</b>，只有數位編號與簽章。拍攝這一關本來就過不了——這是設定，不是故障。`
+        :(rm&&rm!=="1111"
+          ?`<br><br>品牌端記載這張只印了 <b>${layerMaskName(rm)}</b>，判定只計入這些層；四層的量測數據都會列在下方分析中。`
+          :""));
     $("btnCam").textContent="開啟相機拍攝標籤";
   }else{
     $("scanTitle").textContent="請將標籤放進框內";
@@ -866,7 +905,7 @@ $("btnCheck").onclick=()=>{
   // ?layers=1010 → 這一頁只判定指定的層（層組合實印實驗用）。
   // 只作用於本次載入，不覆寫校定面板存在 localStorage 的預設值。
   const ql=q.get("layers");
-  if(ql!=null)setEvalMask(ql);
+  if(ql!=null){ URL_MASK=ql; setEvalMask(ql,"url"); }
   const d=q.get("demo");
   const m=parseLabelCode(location.hash);
   if(m){

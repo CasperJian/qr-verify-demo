@@ -117,6 +117,13 @@
   .pill.bad{color:var(--fail); background:var(--fail-bg); border-color:var(--fail-line);}
   .pill.warn{color:var(--warn); background:var(--warn-bg); border-color:var(--warn-line);}
   .acts{display:flex; gap:6px;}
+  .ly{display:inline-block; width:21px; height:21px; line-height:20px; text-align:center;
+    font-size:.8rem; border-radius:4px; border:1px solid var(--line); margin-right:2px;
+    cursor:pointer; user-select:none;}
+  .ly.on{background:var(--pass-bg); border-color:var(--pass-line); color:var(--pass); font-weight:700;}
+  .ly.off{background:var(--mute-bg); color:#aaa6a0;}
+  .ly.ro{cursor:default;}
+  .lyname{font-size:.74rem; color:var(--ink-soft); margin-left:5px;}
   .empty{padding:26px; text-align:center; color:var(--ink-soft); font-size:.85rem;}
 
   /* 軌跡 */
@@ -264,11 +271,18 @@
       <input type="text" id="fBatch" class="mono" size="12" spellcheck="false">
       <label class="f" for="fQty">數量</label>
       <input type="number" id="fQty" min="1" max="50" value="5" style="width:78px">
-      <label class="sw" title="這批標籤是否以防偽層版本印製">
-        <input type="checkbox" id="fHidden" checked><i></i>
-        <span class="f" style="color:var(--ink)">開通防偽層</span>
-      </label>
       <button id="btnIssue" class="primary">產生防偽碼</button>
+    </div>
+    <div class="row">
+      <span class="f">防偽層（可逐層開關）</span>
+      <span id="fLayers"></span>
+      <span class="lyname" id="fLayersName"></span>
+      <span style="margin-left:6px">
+        <button class="sm" data-preset="1111">四層</button>
+        <button class="sm" data-preset="1100">僅深色</button>
+        <button class="sm" data-preset="0011">僅淺色</button>
+        <button class="sm" data-preset="0000">不開通</button>
+      </span>
     </div>
     <div class="row">
       <label class="f" for="fBase">驗證站網址</label>
@@ -276,8 +290,10 @@
       <span class="hint">QR 內容＝此網址＋不透明短碼。現場若要用區網示範可改這裡。</span>
     </div>
     <p class="hint" style="margin-top:12px">
-      <b>開通防偽層</b>＝這批標籤送印時是否加上印刷才有的防偽訊號。未開通者只有數位序號與簽章：掃碼仍可查得到、
-      簽章仍然有效，但拍攝驗證那一關會判不過。實務上用在贈品、內部樣品這類不需要防偽的批次。
+      <b>防偽層</b>＝這批標籤送印時要加上哪幾層防偽訊號，四層可以分別開關。
+      驗證端會依這裡的登錄<b>自動判定該張標籤該有哪幾層</b>——沒開的層不列入判定，但仍會量測並顯示分析數據。
+      四層全不開通者只有數位序號與簽章：掃碼查得到、簽章有效，但拍攝那關會判不過，
+      實務上用在贈品、內部樣品這類不需要防偽的批次。
     </p>
     <p class="hint" style="margin-top:8px; border-left:3px solid var(--press); padding-left:11px">
       <b>這裡產生的碼可以示範什麼：</b>掃碼落地、簽章驗證、以及下方管理台的停用／作廢是否真的擋得下來。
@@ -332,8 +348,9 @@
     <select id="qItem"><option value="">全部品項</option></select>
     <select id="qHidden">
       <option value="">防偽層不限</option>
-      <option value="1">已開通</option>
-      <option value="0">未開通</option>
+      <option value="full">四層全開</option>
+      <option value="part">部分開通</option>
+      <option value="none">未開通</option>
     </select>
     <button id="btnReset" class="sm" style="margin-left:auto">重設示範資料</button>
   </div>
@@ -418,21 +435,40 @@ function defaultBase(){
 /* ===== 示範資料 ===== */
 const ITEMS = ["錢母","金雞","平安符","開運手鍊","限量紀念幣"];
 const PLACES = ["台北 · 中山","台中 · 西屯","高雄 · 左營","新竹 · 東區","台南 · 中西","桃園 · 中壢","線上通路"];
-function mkLabel(serial, item, batch, hidden, status, issued, scans, last){
+const LN = "①②③④";
+const LDESC = ["深模塊 a*","深模塊 b*","淺模塊 b*","淺模塊 a*"];
+const MASK_STD = {"1111":"四層全開","1100":"僅深色層","0011":"僅淺色層","0000":"未開通"};
+function normMask(v){
+  if(typeof v === "string" && /^[01]{4}$/.test(v)) return v;
+  if(v === false) return "0000";
+  return "1111";                                   // 含舊資料的 hidden:true
+}
+function maskName(m){
+  if(MASK_STD[m]) return MASK_STD[m];
+  const on = [...m].map((c,i)=>c==="1"?LN[i]:"").join("");
+  return `${on.length} 層（${on}）`;
+}
+function maskBadges(m, ro){
+  return [...normMask(m)].map((c,i)=>
+    `<span class="ly ${c==="1"?"on":"off"}${ro?" ro":""}"${ro?"":` data-act="ly" data-i="${i}"`}
+      title="隱碼${LN[i]} ${LDESC[i]}">${LN[i]}</span>`).join("");
+}
+function mkLabel(serial, item, batch, layers, status, issued, scans, last){
   const token = hmacSha256Hex(DEMO_KEY, serial);
-  return {serial, code: packCode(serial, token.slice(0,10)), item, batch, hidden, status, issued, scans, last};
+  return {serial, code: packCode(serial, token.slice(0,10)), item, batch,
+          layers: normMask(layers), status, issued, scans, last};
 }
 function seed(){
   const L = [
     // 這一組是實際已印出來的測試標籤，現場可以拿實體來掃
-    mkLabel("JS17C-FCHAQ","錢母","B2608-A",true,"active","2026-08-24",37,{t:"2026-09-03 14:22",p:"台北 · 中山",r:"pass"}),
-    mkLabel("4KT2M-9WPX7","錢母","B2608-A",true,"active","2026-08-24",12,{t:"2026-09-03 11:05",p:"台中 · 西屯",r:"pass"}),
-    mkLabel("QB6HN-3ZR5D","金雞","B2608-A",true,"active","2026-08-24",8,{t:"2026-09-02 18:40",p:"高雄 · 左營",r:"pass"}),
-    mkLabel("7XKD2-M4NBQ","金雞","B2608-B",true,"active","2026-08-28",3,{t:"2026-09-01 09:15",p:"新竹 · 東區",r:"pass"}),
-    mkLabel("H3M8P-VR2TC","平安符","B2609-A",true,"inactive","2026-09-02",0,null),
-    mkLabel("N5WQ7-KD4XJ","平安符","B2609-A",true,"inactive","2026-09-02",0,null),
-    mkLabel("T9BR4-2HFMS","開運手鍊","B2607-S",false,"active","2026-07-30",5,{t:"2026-08-29 16:02",p:"線上通路",r:"hold"}),
-    mkLabel("V2CJ6-8PQWN","限量紀念幣","B2606-X",true,"void","2026-06-18",21,{t:"2026-08-11 13:47",p:"桃園 · 中壢",r:"fail"}),
+    mkLabel("JS17C-FCHAQ","錢母","B2608-A","1111","active","2026-08-24",37,{t:"2026-09-03 14:22",p:"台北 · 中山",r:"pass"}),
+    mkLabel("4KT2M-9WPX7","錢母","B2608-A","1111","active","2026-08-24",12,{t:"2026-09-03 11:05",p:"台中 · 西屯",r:"pass"}),
+    mkLabel("QB6HN-3ZR5D","金雞","B2608-A","1111","active","2026-08-24",8,{t:"2026-09-02 18:40",p:"高雄 · 左營",r:"pass"}),
+    mkLabel("7XKD2-M4NBQ","金雞","B2608-B","1100","active","2026-08-28",3,{t:"2026-09-01 09:15",p:"新竹 · 東區",r:"pass"}),
+    mkLabel("H3M8P-VR2TC","平安符","B2609-A","1111","inactive","2026-09-02",0,null),
+    mkLabel("N5WQ7-KD4XJ","平安符","B2609-A","0011","inactive","2026-09-02",0,null),
+    mkLabel("T9BR4-2HFMS","開運手鍊","B2607-S","0000","active","2026-07-30",5,{t:"2026-08-29 16:02",p:"線上通路",r:"hold"}),
+    mkLabel("V2CJ6-8PQWN","限量紀念幣","B2606-X","1111","void","2026-06-18",21,{t:"2026-08-11 13:47",p:"桃園 · 中壢",r:"fail"}),
   ];
   const E = [
     {t:"2026-09-03 14:22", s:"JS17C-FCHAQ", p:"台北 · 中山", r:"pass"},
@@ -448,8 +484,18 @@ function seed(){
 }
 let DB = null;
 function load(){
-  try{ const raw = localStorage.getItem(KEY); if(raw){ DB = JSON.parse(raw); return; } }catch(e){}
+  try{ const raw = localStorage.getItem(KEY); if(raw){ DB = JSON.parse(raw); migrate(); return; } }catch(e){}
   DB = seed(); save();
+}
+/* 舊版每張標籤只有 hidden 布林值，換成四層遮罩 */
+function migrate(){
+  let dirty = false;
+  for(const L of (DB.labels||[])){
+    if(typeof L.layers !== "string" || !/^[01]{4}$/.test(L.layers)){
+      L.layers = normMask(L.hidden); delete L.hidden; dirty = true;
+    }
+  }
+  if(dirty) save();
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
 
@@ -472,14 +518,14 @@ function issue(){
   const item = $("fItem").value;
   const batch = $("fBatch").value.trim() || autoBatch();
   const qty = Math.max(1, Math.min(50, +$("fQty").value || 1));
-  const hidden = $("fHidden").checked;
+  const layers = ISSUE_MASK;
   const base = $("fBase").value.trim() || defaultBase();
   const today = new Date().toISOString().slice(0,10);
 
   lastBatch = [];
   for(let i=0;i<qty;i++){
     const serial = randSerial();
-    const L = mkLabel(serial, item, batch, hidden, "inactive", today, 0, null);
+    const L = mkLabel(serial, item, batch, layers, "inactive", today, 0, null);
     L.url = base + "#" + L.code;
     DB.labels.unshift(L);
     lastBatch.push(L);
@@ -493,9 +539,8 @@ function issue(){
   $("oCode").textContent = f.code;
   $("oUrl").textContent = f.url;
   $("oItem").textContent = `${f.item}　/　${f.batch}`;
-  $("oHidden").innerHTML = f.hidden
-    ? `<span class="pill on">已開通</span>`
-    : `<span class="pill off">未開通（僅數位序號）</span>`;
+  $("oHidden").innerHTML = maskBadges(f.layers,true)
+    + `<span class="lyname">${maskName(f.layers)}</span>`;
   $("lnkVerify").href = f.url;
   paintStatus();
   $("batchNote").innerHTML = qty > 1
@@ -516,6 +561,20 @@ function paintStatus(){
     ? (lastBatch.length>1 ? "停用這一批" : "停用")
     : (lastBatch.length>1 ? "啟用這一批" : "啟用");
 }
+/* 發碼台的四層開關 */
+let ISSUE_MASK = "1111";
+function paintIssueMask(){
+  $("fLayers").innerHTML = maskBadges(ISSUE_MASK);
+  $("fLayersName").textContent = maskName(ISSUE_MASK);
+}
+$("fLayers").addEventListener("click", e=>{
+  const b = e.target.closest('[data-act="ly"]'); if(!b) return;
+  const i = +b.dataset.i;
+  ISSUE_MASK = ISSUE_MASK.slice(0,i) + (ISSUE_MASK[i]==="1"?"0":"1") + ISSUE_MASK.slice(i+1);
+  paintIssueMask();
+});
+document.querySelectorAll("[data-preset]").forEach(b=>
+  b.addEventListener("click", ()=>{ ISSUE_MASK = b.dataset.preset; paintIssueMask(); }));
 function autoBatch(){
   const d = new Date();
   return `B${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,"0")}-N`;
@@ -530,8 +589,9 @@ function download(name, blob){
 }
 function exportCsv(){
   if(!lastBatch.length) return;
-  const head = ["序號","不透明短碼","QR內容","品項","批次","防偽層","發行日"];
-  const rows = lastBatch.map(L=>[L.serial,L.code,L.url,L.item,L.batch,L.hidden?"已開通":"未開通",L.issued]);
+  const head = ["序號","不透明短碼","QR內容","品項","批次","防偽層遮罩","防偽層說明","發行日"];
+  const rows = lastBatch.map(L=>[L.serial,L.code,L.url,L.item,L.batch,
+    normMask(L.layers),maskName(L.layers),L.issued]);
   const esc = v => `"${String(v).replace(/"/g,'""')}"`;
   const csv = "﻿" + [head, ...rows].map(r=>r.map(esc).join(",")).join("\r\n");
   download(`防偽碼_${lastBatch[0].batch}_${lastBatch.length}組.csv`, new Blob([csv],{type:"text/csv;charset=utf-8"}));
@@ -552,7 +612,12 @@ function filtered(){
     if(q && !(L.serial.includes(q) || L.code.includes(q))) return false;
     if(st && L.status !== st) return false;
     if(it && L.item !== it) return false;
-    if(hd && String(L.hidden?1:0) !== hd) return false;
+    if(hd){
+      const n = (normMask(L.layers).match(/1/g)||[]).length;
+      if(hd === "full" && n !== 4) return false;
+      if(hd === "part" && (n === 0 || n === 4)) return false;
+      if(hd === "none" && n !== 0) return false;
+    }
     return true;
   });
 }
@@ -565,7 +630,7 @@ function render(){
     [all.length,"已發行標籤"],
     [n("active"),"已啟用"],
     [n("inactive"),"未啟用"],
-    [all.filter(L=>L.hidden).length,"防偽層已開通"],
+    [all.filter(L=>normMask(L.layers)!=="0000").length,"防偽層已開通"],
     [scans,"累計驗證次數"],
   ].map(([v,t])=>`<div class="stat"><b>${v}</b><span>${t}</span></div>`).join("");
 
@@ -583,8 +648,7 @@ function render(){
       <td class="mono">${L.serial}</td>
       <td>${L.item}</td>
       <td class="mono">${L.batch}</td>
-      <td><label class="sw"><input type="checkbox" data-act="hidden" ${L.hidden?"checked":""}><i></i>
-          <span class="pill ${L.hidden?"on":"off"}">${L.hidden?"已開通":"未開通"}</span></label></td>
+      <td>${maskBadges(L.layers)}<span class="lyname">${maskName(L.layers)}</span></td>
       <td><span class="pill ${st.c}">${st.t}</span></td>
       <td class="mono">${L.issued}</td>
       <td class="mono">${L.scans||0}</td>
@@ -622,6 +686,20 @@ function render(){
 
 /* ===== 互動 ===== */
 $("rows").addEventListener("click", e=>{
+  const ly = e.target.closest('[data-act="ly"]');
+  if(ly){                                     // 逐層開關
+    const L = DB.labels.find(x=>x.serial === ly.closest("tr").dataset.s);
+    if(L){
+      const i = +ly.dataset.i, m = normMask(L.layers);
+      L.layers = m.slice(0,i) + (m[i]==="1"?"0":"1") + m.slice(i+1);
+      save(); render();
+      if(lastBatch.length===1 && lastBatch[0].serial===L.serial){
+        lastBatch[0].layers = L.layers;
+        $("oHidden").innerHTML = maskBadges(L.layers,true)+`<span class="lyname">${maskName(L.layers)}</span>`;
+      }
+    }
+    return;
+  }
   const btn = e.target.closest("button[data-act]");
   if(!btn) return;
   const serial = btn.closest("tr").dataset.s;
@@ -642,8 +720,8 @@ $("rows").addEventListener("click", e=>{
     $("oCode").textContent = L.code;
     $("oUrl").textContent = url;
     $("oItem").textContent = `${L.item}　/　${L.batch}`;
-    $("oHidden").innerHTML = L.hidden ? `<span class="pill on">已開通</span>`
-                                      : `<span class="pill off">未開通（僅數位序號）</span>`;
+    $("oHidden").innerHTML = maskBadges(L.layers,true)
+      + `<span class="lyname">${maskName(L.layers)}</span>`;
     $("lnkVerify").href = url;
     $("batchNote").textContent = "";
     lastBatch = [Object.assign({}, L, {url})];
@@ -651,12 +729,6 @@ $("rows").addEventListener("click", e=>{
     $("issueOut").style.display = "";
     $("issueOut").scrollIntoView({block:"center"});
   }
-});
-$("rows").addEventListener("change", e=>{
-  const box = e.target.closest('input[data-act="hidden"]');
-  if(!box) return;
-  const L = DB.labels.find(x=>x.serial === box.closest("tr").dataset.s);
-  if(L){ L.hidden = box.checked; save(); render(); }
 });
 $("btnActivate").onclick = ()=>{
   if(!lastBatch.length) return;
@@ -684,6 +756,7 @@ $("btnReset").onclick = ()=>{
 });
 
 /* ===== 啟動 ===== */
+paintIssueMask();
 $("fBase").value = defaultBase();
 $("fBatch").value = autoBatch();
 load();
