@@ -303,6 +303,14 @@
       <input type="text" id="fBase" class="mono" style="width:min(30em,90%)" spellcheck="false">
       <span class="hint">QR 內容＝此網址＋不透明短碼。現場若要用區網示範可改這裡。</span>
     </div>
+    <div class="row">
+      <span class="f">掃碼行為</span>
+      <label class="sw" title="讓產生的碼在任何裝置掃描後都能走完整通過流程">
+        <input type="checkbox" id="fDemoCode" checked><i></i>
+        <span class="f" style="color:var(--ink)">示範碼（掃描即可完整通過）</span>
+      </label>
+      <span class="hint" id="demoHint"></span>
+    </div>
     <p class="hint" style="margin-top:12px">
       <b>防偽層</b>＝這批標籤送印時要加上哪幾層防偽訊號，四層可以分別開關。
       驗證端會依這裡的登錄<b>自動判定該張標籤該有哪幾層</b>——沒開的層不列入判定，但仍會量測並顯示分析數據。
@@ -310,9 +318,12 @@
       實務上用在贈品、內部樣品這類不需要防偽的批次。
     </p>
     <p class="hint" style="margin-top:8px; border-left:3px solid var(--press); padding-left:11px">
-      <b>這裡產生的碼可以示範什麼：</b>掃碼落地、簽章驗證、以及下方管理台的停用／作廢是否真的擋得下來。
-      <b>不能示範什麼：</b>拍攝驗證那一關——防偽層是<b>印刷時</b>加上去的，螢幕上沒有，所以拍螢幕必定判不過。
-      要看完整通過的畫面，請拿實體印出來的標籤（清單中的 <span class="mono">JS17C-FCHAQ</span> 就是已印出的那張）。
+      <b>為什麼需要「示範碼」：</b>防偽層是<b>印刷時</b>加上去的，螢幕上沒有，所以拍螢幕那一關在真實模式下必定判不過；
+      而標籤的登錄資料只存在產生碼的那台裝置，用另一支手機掃是查不到的。示範碼把旗標寫進 QR 網址本身，
+      因此<b>換任何裝置、任何瀏覽器掃都能走完整通過流程</b>，不需要實體標籤。
+      驗證頁會明確標示第 2 關為模擬結果，<b>編號與簽章仍然實際驗算</b>——改一個字元照樣被擋下。<br>
+      關掉這個開關就是真實行為：拍螢幕過不了，要完整通過必須拿實體印出來的標籤
+      （清單中的 <span class="mono">JS17C-FCHAQ</span> 就是已印出的那張）。
     </p>
 
     <div id="issueOut" style="display:none">
@@ -331,6 +342,7 @@
             <dt>啟用狀態</dt><dd id="oStatus">—</dd>
             <dt>中央圖</dt><dd id="oLogo">—</dd>
             <dt>掃碼自檢</dt><dd id="oCheck">—</dd>
+            <dt>掃碼行為</dt><dd id="oDemo">—</dd>
           </dl>
           <div class="row" style="margin-top:14px">
             <button id="btnActivate" class="sm">啟用這一批</button>
@@ -401,7 +413,8 @@
     <h3>現場示範動線（三分鐘）· 三道防線，各擋一種攻擊</h3>
     <ol>
       <li><b>產生新碼</b>　在<a class="inline" href="#issue">發碼台</a>按一下。序號與簽章當場算出來，不是預先準備好的。
-          新碼預設<b>未啟用</b>。</li>
+          預設是<b>示範碼</b>：手機掃了就能走完整通過流程，不必帶實體標籤。
+          要示範下面第 2～3 步的擋下效果，把「示範碼」關掉再產生一組。</li>
       <li><b>第 3 道先登場：管理層</b>　立刻用手機掃畫面上的 QR →
           <b>被擋下：「此編號尚未啟用」</b>。標籤還沒貼標入庫就流出，一樣沒用。
           <span class="hint">擋的是「標籤外流、通路竄貨、召回批次」。</span></li>
@@ -606,6 +619,10 @@ function paintQRPanel(L, url){
   $("oHidden").innerHTML = maskBadges(L.layers,true) + `<span class="lyname">${maskName(L.layers)}</span>`;
   $("oLogo").innerHTML = (nLogo>0 && LOGO_IMG) ? `${nLogo}×${nLogo} 模塊`
                        : (nLogo>0 ? `<span class="hint">已選 ${nLogo}×${nLogo}，尚未上傳圖檔</span>` : "不放圖");
+  const isDemo = /[?&]demo=live(&|$|#)/.test(url);
+  $("oDemo").innerHTML = isDemo
+    ? `<span class="pill warn">示範碼</span>　<span class="hint">任何裝置掃描都能走完整通過流程；第 2 關為模擬結果</span>`
+    : `<span class="pill on">真實驗證</span>　<span class="hint">需拿實體印出來的標籤才能通過第 2 關</span>`;
   const ck = qrSelfCheck(url, nLogo);
   $("oCheck").innerHTML =
       ck.level==="ok"       ? `<span class="pill on">可正常掃描</span>　<span class="hint">${ck.pass}/${ck.total} 種解析度皆解得出</span>`
@@ -623,14 +640,17 @@ function issue(){
   const qty = Math.max(1, Math.min(50, +$("fQty").value || 1));
   const layers = ISSUE_MASK;
   const base = $("fBase").value.trim() || defaultBase();
+  const demoCode = $("fDemoCode").checked;
   const today = new Date().toISOString().slice(0,10);
 
   lastBatch = [];
   for(let i=0;i<qty;i++){
     const serial = randSerial();
-    const L = mkLabel(serial, item, batch, layers, "inactive", today, 0, null);
+    const L = mkLabel(serial, item, batch, layers,
+                      demoCode ? "active" : "inactive", today, 0, null);
     L.logo = LOGO_IMG ? (+$("fLogoSize").value || 0) : 0;
-    L.url = base + "#" + L.code;
+    L.demo = demoCode;
+    L.url = base + (demoCode ? (base.includes("?") ? "&" : "?") + "demo=live" : "") + "#" + L.code;
     DB.labels.unshift(L);
     lastBatch.push(L);
   }
@@ -845,6 +865,12 @@ $("btnReset").onclick = ()=>{
 });
 
 /* ===== 啟動 ===== */
+function paintDemoHint(){
+  $("demoHint").textContent = $("fDemoCode").checked
+    ? "產生的碼會發成「已啟用」，掃了就能看到完整通過畫面。"
+    : "真實行為：新碼預設未啟用，且須以實體印刷標籤才能通過拍攝那一關。";
+}
+$("fDemoCode").addEventListener("change", paintDemoHint);
 $("fLogoFile").addEventListener("change", e=>{
   const f = e.target.files && e.target.files[0];
   if(f) acceptLogo(f);
@@ -860,6 +886,7 @@ $("btnLogoClear").onclick = ()=>{
   if(lastBatch.length){ lastBatch[0].logo = 0; redrawCurrent(); }
 };
 paintIssueMask();
+paintDemoHint();
 loadLogo();
 $("fBase").value = defaultBase();
 $("fBatch").value = autoBatch();

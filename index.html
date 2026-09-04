@@ -913,6 +913,25 @@ $("btnCheck").onclick=()=>{
     if(!gateSerial(m.serial,m.token))return;
     HASH_SERIAL=m.serial;HASH_TOKEN=m.token;
   }
+  // ?demo=live：拍攝量測那一關以模擬的正品數值呈現，讓沒有實體標籤也能走完整流程。
+  // 旗標寫在網址裡而不是本機儲存，所以換任何裝置掃這個 QR 都成立。
+  // 編號與簽章仍然實際驗算（上面已驗過），改一個字元照樣被擋下。
+  if(d==="live"){
+    if(m){SERIAL=m.serial;TOKEN=m.token;}
+    demoPass();
+    const el=$("comboTag");
+    if(el){
+      el.style.display="";
+      el.style.borderColor="#9a6b10"; el.style.background="#f8f1e0"; el.style.color="#4a3505";
+      el.innerHTML=`<b>示範模式：第 2 關（拍攝量測）為模擬結果</b><br>`
+        +`這個網址帶了 <code>?demo=live</code>，因此不需要實體標籤也能看到完整的通過畫面。`
+        +`<b>編號與數位簽章仍然是實際驗算的</b>——改動編號任何一個字元都會被擋下。<br>`
+        +`實體防偽層無法在螢幕上重現，要看真正的量測請改用`
+        +`<a href="${location.pathname}${location.hash}" style="color:inherit"><b>相機實際量測</b></a>`
+        +`（需要印出來的標籤）。`;
+    }
+    return;
+  }
   if(d==="pass"){demoPass();return;}
   if(d==="fail"){demoFail();return;}
   if(d==="sig"){demoSig();return;}
