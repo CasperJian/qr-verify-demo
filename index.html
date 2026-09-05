@@ -761,7 +761,8 @@ $("btnReeval").onclick=()=>{
 
 /* ===== 示範模式：不需實體標籤，直接看兩種畫面 ===== */
 function demoSerial(){
-  const s=SERIAL||"7Q3KX-9M2PD";
+  // 帶了短碼進來就用那顆真序號，示範畫面才會對應到剛才掃的那張
+  const s=SERIAL||HASH_SERIAL||"7Q3KX-9M2PD";
   return[s,hmacSha256Hex(DEMO_KEY,s).slice(0,10)];
 }
 function demoPass(){
