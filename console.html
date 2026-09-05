@@ -376,7 +376,11 @@
       <option value="part">部分開通</option>
       <option value="none">未開通</option>
     </select>
-    <button id="btnReset" class="sm" style="margin-left:auto">重設示範資料</button>
+    <label class="sm" style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;
+           border:1px solid var(--line);border-radius:5px;padding:4px 9px;cursor:pointer;background:#fdfdfb;font-size:.78rem">
+      匯入批次 JSON<input type="file" id="fImport" accept=".json,application/json" style="display:none">
+    </label>
+    <button id="btnReset" class="sm">重設示範資料</button>
   </div>
 
   <div class="tblwrap">
@@ -471,10 +475,16 @@ function maskBadges(m, ro){
     `<span class="ly ${c==="1"?"on":"off"}${ro?" ro":""}"${ro?"":` data-act="ly" data-i="${i}"`}
       title="隱碼${LN[i]} ${LDESC[i]}">${LN[i]}</span>`).join("");
 }
+/* 一張實體標籤的身分＝序號 ＋ 這張印了哪幾層。
+   層組合測試裡 16 張共用同一個序號（QR 內容相同），只有遮罩不同。 */
+function uidOf(serial, layers){
+  const m = normMask(layers);
+  return m === "1111" ? serial : serial + "@" + m;
+}
 function mkLabel(serial, item, batch, layers, status, issued, scans, last){
   const token = hmacSha256Hex(DEMO_KEY, serial);
-  return {serial, code: packCode(serial, token.slice(0,10)), item, batch,
-          layers: normMask(layers), status, issued, scans, last};
+  return {uid: uidOf(serial, layers), serial, code: packCode(serial, token.slice(0,10)),
+          item, batch, layers: normMask(layers), status, issued, scans, last};
 }
 function seed(){
   const L = [
@@ -512,6 +522,7 @@ function migrate(){
     if(typeof L.layers !== "string" || !/^[01]{4}$/.test(L.layers)){
       L.layers = normMask(L.hidden); delete L.hidden; dirty = true;
     }
+    if(!L.uid){ L.uid = uidOf(L.serial, L.layers); dirty = true; }
   }
   if(dirty) save();
 }
@@ -653,7 +664,7 @@ function issue(){
 /* 結果面板的啟用狀態：與下方清單同一份資料，按鈕會即時反映 */
 function paintStatus(){
   if(!lastBatch.length) return;
-  const on = lastBatch.every(L => (DB.labels.find(x=>x.serial===L.serial)||L).status === "active");
+  const on = lastBatch.every(L => (DB.labels.find(x=>x.uid===L.uid)||L).status === "active");
   $("oStatus").innerHTML = on
     ? `<span class="pill on">已啟用</span>`
     : `<span class="pill off">未啟用</span>　<span class="hint">掃碼會被擋下</span>`;
@@ -745,8 +756,8 @@ function render(){
   const rows = filtered();
   $("rows").innerHTML = rows.length ? rows.map(L=>{
     const st = STATUS[L.status], last = L.last;
-    return `<tr data-s="${L.serial}">
-      <td class="mono">${L.serial}</td>
+    return `<tr data-s="${L.uid}">
+      <td class="mono">${L.serial}${L.layers!=="1111"?`<span class="lyname">@${L.layers}</span>`:""}</td>
       <td>${L.item}</td>
       <td class="mono">${L.batch}</td>
       <td>${maskBadges(L.layers)}<span class="lyname">${maskName(L.layers)}</span></td>
@@ -789,12 +800,13 @@ function render(){
 $("rows").addEventListener("click", e=>{
   const ly = e.target.closest('[data-act="ly"]');
   if(ly){                                     // 逐層開關
-    const L = DB.labels.find(x=>x.serial === ly.closest("tr").dataset.s);
+    const L = DB.labels.find(x=>x.uid === ly.closest("tr").dataset.s);
     if(L){
       const i = +ly.dataset.i, m = normMask(L.layers);
       L.layers = m.slice(0,i) + (m[i]==="1"?"0":"1") + m.slice(i+1);
+      L.uid = uidOf(L.serial, L.layers);
       save(); render();
-      if(lastBatch.length===1 && lastBatch[0].serial===L.serial){
+      if(lastBatch.length===1 && lastBatch[0].uid===L.uid){
         lastBatch[0].layers = L.layers; redrawCurrent();
       }
     }
@@ -802,8 +814,7 @@ $("rows").addEventListener("click", e=>{
   }
   const btn = e.target.closest("button[data-act]");
   if(!btn) return;
-  const serial = btn.closest("tr").dataset.s;
-  const L = DB.labels.find(x=>x.serial===serial);
+  const L = DB.labels.find(x=>x.uid === btn.closest("tr").dataset.s);
   if(!L) return;
   const act = btn.dataset.act;
   const url = labelUrl(L);
@@ -822,9 +833,9 @@ $("rows").addEventListener("click", e=>{
 });
 $("btnActivate").onclick = ()=>{
   if(!lastBatch.length) return;
-  const on = lastBatch.every(L => (DB.labels.find(x=>x.serial===L.serial)||L).status === "active");
+  const on = lastBatch.every(L => (DB.labels.find(x=>x.uid===L.uid)||L).status === "active");
   for(const b of lastBatch){
-    const L = DB.labels.find(x=>x.serial===b.serial);
+    const L = DB.labels.find(x=>x.uid===b.uid);
     if(L) L.status = on ? "inactive" : "active";
   }
   save(); paintStatus(); render();
@@ -839,6 +850,32 @@ $("btnQrPng").onclick = ()=>{
   drawQR(big, url, 16, (f.logo!=null)?f.logo:(+$("fLogoSize").value||0));
   big.toBlob(b => download(`QR_${f.serial}.png`, b), "image/png");
 };
+/* 匯入 make_matrix.py 產生的 批次.json：一列一張實體標籤（序號＋層遮罩）。
+   短碼一律由序號重算，確保與驗證頁用的是同一套 crypto，檔案改壞了會當場看出來。 */
+$("fImport").addEventListener("change", async e=>{
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if(!f) return;
+  let rows;
+  try{ rows = JSON.parse(await f.text()); }catch(err){ alert("讀不到 JSON："+err); return; }
+  if(!Array.isArray(rows) || !rows.length){ alert("格式不對：需要一個陣列。"); return; }
+  const today = new Date().toISOString().slice(0,10);
+  let added=0, updated=0, bad=0;
+  for(const r of rows){
+    if(!r || !/^[0-9A-Z]{5}-[0-9A-Z]{5}$/.test(r.serial||"")){ bad++; continue; }
+    const L = mkLabel(r.serial, r.item||"匯入", r.batch||"IMPORT",
+                      r.layers, r.status||"inactive", r.issued||today,
+                      +r.scans||0, r.last||null);
+    if(r.code && r.code !== L.code){ bad++; continue; }      // 短碼對不上＝檔案有問題
+    L.logo = +r.logo || 0;
+    L.url  = r.url || labelUrl(L);
+    const i = DB.labels.findIndex(x=>x.uid === L.uid);
+    if(i >= 0){ DB.labels[i] = L; updated++; } else { DB.labels.unshift(L); added++; }
+  }
+  save(); render();
+  alert(`匯入完成：新增 ${added} 筆、更新 ${updated} 筆` + (bad?`，略過 ${bad} 筆格式或短碼不符`:""));
+  document.getElementById("manage").scrollIntoView();
+});
 $("btnReset").onclick = ()=>{
   if(!confirm("重設示範資料？您在這裡產生的碼會一併清除。")) return;
   DB = seed(); save(); $("issueOut").style.display="none"; render();
