@@ -176,6 +176,7 @@
   <div class="btnrow">
     <button id="btnCam" style="display:none">啟動相機</button>
     <button id="btnShot" class="ghost" style="display:none">停止並以目前取樣判定</button>
+    <button id="btnDemoStep2" class="ghost" style="display:none">示範：模擬拍攝結果（免實體標籤）</button>
   </div>
   <div class="manual" id="manualBox" style="display:none">
     <p class="note" style="margin-top:8px">或手動輸入標籤上的序號與簽章：</p>
@@ -513,6 +514,7 @@ function decide(avg,T){
 let SERIAL=null,TOKEN=null,PART=null,COUNT=null,QROBJ=null;
 let stream=null,loopTimer=null,samples=[],lastAvg=null,demoMode=false;
 let HASH_SERIAL=null,HASH_TOKEN=null;   // 第一次掃碼帶進來的序號（第二次拍攝時比對用）
+let DEMO_FLOW=false;                    // ?demo=flow：第 2 關允許以模擬結果完成
 const FRAMES_NEED=3, TIMEOUT_MS=20000, LOOP_MS=120;
 
 /* ===== 畫面繪製 ===== */
@@ -814,6 +816,8 @@ function realMode(useHash,autoStart){
     $("scanLead").innerHTML="讀碼、序號簽章檢查、四條隱碼量測會在同一次取景內完成。";
     $("btnCam").textContent="啟動相機";
   }
+  // 示範用：沒有實體標籤時，讓第 2 關也能走完。按鈕文字寫明是模擬結果。
+  $("btnDemoStep2").style.display = (DEMO_FLOW && SERIAL) ? "" : "none";
   if(autoStart)startCam(); else $("btnCam").style.display="";
 }
 $("btnDemoPass").onclick=demoPass;
@@ -821,6 +825,7 @@ $("btnDemoFail").onclick=demoFail;
 $("btnDemoSig").onclick=demoSig;
 $("btnReal").onclick=()=>realMode(false,true);
 $("btnCam").onclick=startCam;
+$("btnDemoStep2").onclick=()=>{ stopStream(); demoPass(); };
 $("btnShot").onclick=finishCam;
 window.addEventListener("pagehide",stopStream);
 
@@ -844,6 +849,9 @@ $("btnCheck").onclick=()=>{
     if(hmacSha256Hex(DEMO_KEY,m.serial).slice(0,10)!==m.token){showSigFail(m.serial,m.token);return;}
     HASH_SERIAL=m.serial;HASH_TOKEN=m.token;
   }
+  // ?demo=flow：完整走兩段式（第 1 關真的驗簽、停在第 2 關），
+  // 但第 2 關多一顆明確標示的示範按鈕，讓沒有實體標籤時也能把流程走完。
+  if(d==="flow")DEMO_FLOW=true;
   if(d==="pass"){demoPass();return;}
   if(d==="fail"){demoFail();return;}
   if(d==="sig"){demoSig();return;}
