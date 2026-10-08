@@ -5,17 +5,44 @@
    需先載入 crypto.js（用到 mulberry32）。 */
 "use strict";
 
+/* QR 功能圖樣位置（ISO/IEC 18004 標準表，與 qrlib.js 內的 PATTERN_POSITION_TABLE 同源）
+   索引＝版本−1，值＝對位圖樣中心的座標清單（列與行共用同一組）。 */
+const QR_AP_POS = [
+  [],[6,18],[6,22],[6,26],[6,30],
+  [6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],
+  [6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],
+  [6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],
+  [6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],
+  [6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],
+  [6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],
+  [6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]
+];
+
+/* 標出所有「不承載隱碼」的功能模塊：時序、定位＋格式資訊、版本資訊、對位圖樣。
+   先前只處理到版本 6 的單一對位圖樣，版本 7 以上的多個對位圖樣與版本資訊區塊
+   都被當成資料模塊取樣，會污染量測。這裡一次補齊，並預先算成查表以免逐點掃描。 */
 function qrFunctionMask(count){
-  const v=Math.floor((count-17)/4);
-  const ap=(v>=2&&v<=6)?4*v+10:null;   // 版本 2–6 的對位圖樣中心
-  return (r,c)=>{
-    if(r===6||c===6)return true;
-    if(r<9&&c<9)return true;
-    if(r<9&&c>=count-8)return true;
-    if(r>=count-8&&c<9)return true;
-    if(ap!==null&&Math.abs(r-ap)<=2&&Math.abs(c-ap)<=2)return true;
-    return false;
-  };
+  const v = Math.floor((count - 17) / 4);
+  const pos = QR_AP_POS[v - 1] || [];
+  const last = pos.length - 1;
+  const hasVer = v >= 7;                       // 版本 7 起才有版本資訊區塊
+  const mask = new Uint8Array(count * count);
+  const set = (r, c) => { if(r >= 0 && c >= 0 && r < count && c < count) mask[r * count + c] = 1; };
+
+  for(let i = 0; i < count; i++){ set(6, i); set(i, 6); }          // 時序圖樣
+  for(let r = 0; r < 9; r++)for(let c = 0; c < 9; c++)set(r, c);   // 左上定位＋格式資訊
+  for(let r = 0; r < 9; r++)for(let c = count - 8; c < count; c++)set(r, c);   // 右上
+  for(let r = count - 8; r < count; r++)for(let c = 0; c < 9; c++)set(r, c);   // 左下
+  if(hasVer)for(let i = 0; i < 6; i++)for(let k = 0; k < 3; k++){
+    set(i, count - 11 + k);                                        // 版本資訊（右上 6×3）
+    set(count - 11 + k, i);                                        // 版本資訊（左下 3×6）
+  }
+  // 對位圖樣：pos × pos 的組合，但與三個定位圖樣重疊的那三組不會被畫出來
+  for(let i = 0; i <= last; i++)for(let j = 0; j <= last; j++){
+    if((i === 0 && j === 0) || (i === 0 && j === last) || (i === last && j === 0))continue;
+    for(let dr = -2; dr <= 2; dr++)for(let dc = -2; dc <= 2; dc++)set(pos[i] + dr, pos[j] + dc);
+  }
+  return (r, c) => mask[r * count + c] === 1;
 }
 
 function buildPartition(src,count,token){
