@@ -39,7 +39,7 @@ function squareToQuad(p0,p1,p2,p3){
 }
 
 /* ===== 判定參數 ===== */
-const GRID=4, MIN_PER_GROUP=5, MAX_CHROMA=14;   // 4x4 分格；每格每組至少 5 個模塊；色度超過 14 視為非我方模塊
+const GRID=4, MIN_PER_GROUP=5, MAX_CHROMA=14;   // 4x4 分格；每格每組至少 5 個模塊；色度離墨色／紙色超過 14 視為非我方模塊
 const FRAMES_NEED=3;                            // 一次驗證平均幾幀
 const MIN_MODULE_PX=7;                          // 每模塊少於這麼多像素就不採計（太遠）
 const DEF_T={DA:1.2,DB:1.0,WB:0.8,WA:0.6};      // 各層強度門檻的預設值，須由實印資料校定
@@ -96,16 +96,7 @@ function measureFrame(img,W,H,corners,count,token){
   const hiMean=sorted.slice(-q).reduce((s,v)=>s+v,0)/q;
   const thr=(loMean+hiMean)/2;
   const dark=(r,c)=>{const v=lab[r*count+c];return v?v[0]<thr:false;};
-  // 有效模塊判定：本設計的模塊只會落在近黑或近白兩群；
-  // 亮度離群者不是我們的模塊 —— 中央客製圖、反光、髒污、刮傷皆自動排除。
   const band=Math.max(6,(hiMean-loMean)*0.35);
-  // 色度上限：本設計的模塊在色度上近乎中性，加上印刷與拍攝雜訊仍遠低於 MAX_CHROMA；
-  // 彩色圖案／彩色污損則明顯超出。僅靠亮度不足以排除高亮度的彩色圖（例如金色），故兩條件並用。
-  const valid=(r,c)=>{
-    const v=lab[r*count+c]; if(!v)return false;
-    if(Math.hypot(v[1],v[2])>MAX_CHROMA)return false;
-    return Math.abs(v[0]-loMean)<band || Math.abs(v[0]-hiMean)<band;
-  };
   // ── 功能圖樣 → 雜訊 σ 估計與黑白參考 ──
   const fD=[],fW=[];
   for(let r=0;r<count;r++)for(let c=0;c<count;c++){
@@ -125,6 +116,20 @@ function measureFrame(img,W,H,corners,count,token){
   const refs={darkL:fD.length?fD.reduce((s,v)=>s+v[0],0)/fD.length:null,
               whiteL:fW.length?fW.reduce((s,v)=>s+v[0],0)/fW.length:null,
               sigmaDark:sigmaD,sigmaWhite:sigmaW,nFunc:fD.length+fW.length};
+  // 有效模塊判定：本設計的模塊只會落在近黑或近白兩群；
+  // 亮度離群者不是我們的模塊 —— 中央客製圖、反光、髒污、刮傷皆自動排除。
+  // 色度上限：本設計的模塊在色度上貼近墨色與紙色，加上印刷與拍攝雜訊仍遠低於 MAX_CHROMA；
+  // 彩色圖案／彩色污損則明顯超出。僅靠亮度不足以排除高亮度的彩色圖（例如金色），故兩條件並用。
+  // 色度以「功能圖樣量到的墨色／紙色」為原點，而不是絕對的中性灰：
+  // 暖色燈光或白平衡偏掉時，整張紙會帶十幾到幾十的色度，若以中性灰為原點，淺模塊會整類被剔除。
+  const mid=(arr,ax)=>{const s=arr.map(v=>v[ax]).sort((a,b)=>a-b),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+  const orgD=fD.length>=8?[mid(fD,1),mid(fD,2)]:[0,0], orgW=fW.length>=8?[mid(fW,1),mid(fW,2)]:[0,0];
+  const valid=(r,c)=>{
+    const v=lab[r*count+c]; if(!v)return false;
+    const o=v[0]<thr?orgD:orgW;
+    if(Math.hypot(v[1]-o[0],v[2]-o[1])>MAX_CHROMA)return false;
+    return Math.abs(v[0]-loMean)<band || Math.abs(v[0]-hiMean)<band;
+  };
   // ── 分組（由照片分類，非重新編碼 QR）──
   const part=buildPartition(dark,count,token);
   // ── 鄰域純度權重：同類鄰居越多越乾淨 ──
