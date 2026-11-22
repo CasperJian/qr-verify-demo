@@ -233,10 +233,21 @@
         <tbody id="dbgRows"><tr><td colspan="6" class="note">尚無量測資料。</td></tr></tbody>
       </table>
       <p class="note" id="dbgMeta" style="margin-top:8px"></p>
-      <p class="note">通過規則：納入判定的層方向全部正確，且僅允許一層分離量未達門檻。門檻請用「實印正品 vs 自製仿品」實測校定（存於本機瀏覽器）。</p>
-      <p class="note" style="margin-top:10px">判定範圍會依標籤在品牌端登錄的防偽層自動決定；四層一律全部量測並列在上表，未登錄的層標示「不計入」。</p>
+      <p class="note">通過規則：符號一致率 ≥95% 且強度過底線即通過；85–95% 需各層分離量達門檻（僅允許一層未達）；≤65% 判為複製品；其餘請重拍。門檻請用「實印正品 vs 自製仿品」實測校定（存於本機瀏覽器）。</p>
+      <p class="note" style="margin-top:10px">判定範圍：預設四層全判；網址帶 <code>?layers=</code> 時只判指定的層（層組合實驗用）。四層一律全部量測並列在上表，未納入的層標示「不計入」。</p>
       <div class="btnrow">
         <button class="ghost" id="btnReeval">用新門檻重新判定</button>
+      </div>
+      <p class="note" style="margin-top:12px"><b>實印測試紀錄</b>　每次相機量測都會記在這台裝置的瀏覽器裡（不上傳），測完一次匯出。拍之前先選這張樣本的種類：</p>
+      <div class="btnrow" style="align-items:center">
+        <select id="selKind" style="font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:5px;background:#fdfdfb">
+          <option value="original">原版印刷品</option>
+          <option value="copy">影印／翻印本</option>
+          <option value="screen">螢幕翻拍</option>
+          <option value="other">其他</option>
+        </select>
+        <button class="ghost" id="btnLogCsv">匯出紀錄 CSV（<span id="logN">0</span> 筆）</button>
+        <button class="ghost" id="btnLogClear">清除紀錄</button>
       </div>
     </div>
   </details>
@@ -253,269 +264,58 @@
 <script src="jsqr.js"></script>
 <script src="crypto.js"></script>
 <script src="layers.js"></script>
+<script src="verify-core.js"></script>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
 
-/* ===== 色彩數學（與生成端一致）===== */
-function s2l(v){v/=255;return v<=0.04045?v/12.92:Math.pow((v+0.055)/1.055,2.4);}
-function l2s(v){v=v<=0.0031308?v*12.92:1.055*Math.pow(v,1/2.4)-0.055;return Math.max(0,Math.min(255,Math.round(v*255)));}
-function rgb2lab(r,g,b){
-  const R=s2l(r),G=s2l(g),B=s2l(b);
-  let X=R*0.4124+G*0.3576+B*0.1805, Y=R*0.2126+G*0.7152+B*0.0722, Z=R*0.0193+G*0.1192+B*0.9505;
-  X/=0.95047;Z/=1.08883;
-  const f=t=>t>0.008856?Math.cbrt(t):(7.787*t+16/116);
-  const fx=f(X),fy=f(Y),fz=f(Z);
-  return[116*fy-16,500*(fx-fy),200*(fy-fz)];
-}
-function lab2rgb(L,a,b){
-  const fy=(L+16)/116, fx=fy+a/500, fz=fy-b/200;
-  const inv=t=>(t*t*t>0.008856)?t*t*t:(t-16/116)/7.787;
-  const X=inv(fx)*0.95047, Y=inv(fy), Z=inv(fz)*1.08883;
-  const R=X*3.2406+Y*-1.5372+Z*-0.4986, G=X*-0.9689+Y*1.8758+Z*0.0415, B=X*0.0557+Y*-0.2040+Z*1.0570;
-  return[l2s(R),l2s(G),l2s(B)];
-}
-/* ===== 透視對應：單位方格→影像四邊形 ===== */
-function squareToQuad(p0,p1,p2,p3){
-  const sx=p0.x-p1.x+p2.x-p3.x, sy=p0.y-p1.y+p2.y-p3.y;
-  let a,b,c,d,e,f,g,h;
-  if(Math.abs(sx)<1e-9&&Math.abs(sy)<1e-9){
-    a=p1.x-p0.x; b=p3.x-p0.x; c=p0.x; d=p1.y-p0.y; e=p3.y-p0.y; f=p0.y; g=0; h=0;
-  }else{
-    const dx1=p1.x-p2.x, dx2=p3.x-p2.x, dy1=p1.y-p2.y, dy2=p3.y-p2.y;
-    const den=dx1*dy2-dx2*dy1;
-    g=(sx*dy2-dx2*sy)/den; h=(dx1*sy-sx*dy1)/den;
-    a=p1.x-p0.x+g*p1.x; b=p3.x-p0.x+h*p3.x; c=p0.x;
-    d=p1.y-p0.y+g*p1.y; e=p3.y-p0.y+h*p3.y; f=p0.y;
-  }
-  return (u,v)=>{const w=g*u+h*v+1;return{x:(a*u+b*v+c)/w,y:(d*u+e*v+f)/w};};
-}
-/* ===== 單幀量測 =====
-   三項設計：
-   ① 明暗分類直接由照片亮度判定，不再重新編碼 QR 還原矩陣
-      → 移除「換 QR 編碼器版本可能選到不同遮罩圖樣」的系統性失效模式
-   ② 功能圖樣（定位／對時／對位）保證是純墨與純紙，其內部離散即為純雜訊
-      → 免費取得每次拍攝的 σ 估計值，可回報訊噪比而非未校準的原始強度
-   ③ 鄰域純度加權：明暗交界處的模塊受墨暈污染最重，依同類鄰居數降權 */
-function measureFrame(img,W,H,corners,count,token){
-  const map=squareToQuad(corners.tl,corners.tr,corners.br,corners.bl);
-  const mpx=Math.hypot(corners.tr.x-corners.tl.x,corners.tr.y-corners.tl.y)/count;
-  const rb=Math.max(1,Math.round(mpx*0.22));
-  const d=img.data;
-  function sampleLab(r,c){
-    const p=map((c+0.5)/count,(r+0.5)/count);
-    const cx=Math.round(p.x), cy=Math.round(p.y);
-    let R=0,G=0,B=0,n=0;
-    for(let y=cy-rb;y<=cy+rb;y++)for(let x=cx-rb;x<=cx+rb;x++){
-      if(x<0||y<0||x>=W||y>=H)continue;
-      const i=(y*W+x)*4; R+=d[i];G+=d[i+1];B+=d[i+2];n++;
-    }
-    return n?rgb2lab(R/n,G/n,B/n):null;
-  }
-  // ── 取樣全部模塊 ──
-  const isFunc=qrFunctionMask(count);
-  const lab=new Array(count*count), Ls=[];
-  for(let r=0;r<count;r++)for(let c=0;c<count;c++){
-    const v=sampleLab(r,c); lab[r*count+c]=v;
-    if(v)Ls.push(v[0]);
-  }
-  if(Ls.length<count)return null;
-  // ── 由亮度分佈定明暗門檻（近黑 L*≈7、近白 L*≈97，差距極大，分類穩健）──
-  const sorted=Ls.slice().sort((a,b)=>a-b);
-  const q=Math.max(1,Math.floor(sorted.length*0.3));
-  const loMean=sorted.slice(0,q).reduce((s,v)=>s+v,0)/q;
-  const hiMean=sorted.slice(-q).reduce((s,v)=>s+v,0)/q;
-  const thr=(loMean+hiMean)/2;
-  const dark=(r,c)=>{const v=lab[r*count+c];return v?v[0]<thr:false;};
-  // 有效模塊判定：本設計的模塊只會落在近黑或近白兩群；
-  // 亮度離群者不是我們的模塊 —— 中央客製圖、反光、髒污、刮傷皆自動排除。
-  const band=Math.max(6,(hiMean-loMean)*0.35);
-  // 色度上限：本設計的模塊在色度上近乎中性（隱碼幅度合成後最大約 4.5），
-  // 加上印刷與拍攝雜訊仍遠低於 MAX_CHROMA；彩色圖案／彩色污損則明顯超出。
-  // 僅靠亮度不足以排除高亮度的彩色圖（例如金色），故兩條件並用。
-  const valid=(r,c)=>{
-    const v=lab[r*count+c]; if(!v)return false;
-    if(Math.hypot(v[1],v[2])>MAX_CHROMA)return false;
-    return Math.abs(v[0]-loMean)<band || Math.abs(v[0]-hiMean)<band;
-  };
-  // ── 功能圖樣 → 雜訊 σ 估計與黑白參考 ──
-  const fD=[],fW=[];
-  for(let r=0;r<count;r++)for(let c=0;c<count;c++){
-    if(!isFunc(r,c))continue;
-    const v=lab[r*count+c]; if(!v)continue;
-    if(Math.abs(v[0]-loMean)>=Math.max(6,(hiMean-loMean)*0.35)&&
-       Math.abs(v[0]-hiMean)>=Math.max(6,(hiMean-loMean)*0.35))continue;
-    (v[0]<thr?fD:fW).push(v);
-  }
-  const spread=(arr,ax)=>{
-    if(arr.length<4)return null;
-    const m=arr.reduce((s,v)=>s+v[ax],0)/arr.length;
-    return Math.sqrt(arr.reduce((s,v)=>s+(v[ax]-m)*(v[ax]-m),0)/(arr.length-1));
-  };
-  const sigmaD=Math.max(spread(fD,1)||0,spread(fD,2)||0);
-  const sigmaW=Math.max(spread(fW,1)||0,spread(fW,2)||0);
-  const sigma=Math.max(sigmaD,sigmaW,0.01);
-  const refs={darkL:fD.length?fD.reduce((s,v)=>s+v[0],0)/fD.length:null,
-              whiteL:fW.length?fW.reduce((s,v)=>s+v[0],0)/fW.length:null,
-              sigmaDark:sigmaD,sigmaWhite:sigmaW,nFunc:fD.length+fW.length};
-  // ── 分組（由照片分類，非重新編碼 QR）──
-  const part=buildPartition(dark,count,token);
-  // ── 鄰域純度權重：同類鄰居越多越乾淨 ──
-  function purity(r,c){
-    const me=dark(r,c); let opp=0;
-    for(const[dr,dc]of[[-1,0],[1,0],[0,-1],[0,1]]){
-      const rr=r+dr,cc=c+dc;
-      if(rr<0||cc<0||rr>=count||cc>=count)continue;
-      if(dark(rr,cc)!==me)opp++;
-    }
-    return 1/(1+0.6*opp);
-  }
-  const cellOf=(r,c)=>Math.min(GRID-1,Math.floor(r*GRID/count))*GRID+Math.min(GRID-1,Math.floor(c*GRID/count));
-  const seps=(list,gk,axis)=>{
-    const NC=GRID*GRID;
-    const s1=new Float64Array(NC),n1=new Float64Array(NC),s0=new Float64Array(NC),n0=new Float64Array(NC);
-    const c1=new Int32Array(NC),c0=new Int32Array(NC);
-    let gs1=0,gn1=0,gs0=0,gn0=0;
-    for(const md of list){
-      const v=lab[md.r*count+md.c]; if(!v)continue;
-      if(!valid(md.r,md.c))continue;          // 略過圖形／污損區，但 RNG 順序不受影響
-      const w=purity(md.r,md.c), k=cellOf(md.r,md.c), x=v[axis];
-      if(md[gk]===1){s1[k]+=w*x;n1[k]+=w;c1[k]++;gs1+=w*x;gn1+=w;}
-      else{s0[k]+=w*x;n0[k]+=w;c0[k]++;gs0+=w*x;gn0+=w;}
-    }
-    const cells=[];
-    for(let k=0;k<NC;k++)cells.push((c1[k]>=MIN_PER_GROUP&&c0[k]>=MIN_PER_GROUP)?(s1[k]/n1[k]-s0[k]/n0[k]):null);
-    return{mean:(gn1&&gn0)?(gs1/gn1-gs0/gn0):NaN,cells};
-  };
-  const dA=seps(part.modules,"g1",1), dB=seps(part.modules,"g2",2);
-  const wB=seps(part.wmodules,"g1",2), wA=seps(part.wmodules,"g2",1);
-  let nEx=0;
-  for(const md of part.modules.concat(part.wmodules))if(!valid(md.r,md.c))nEx++;
-  return{DA:dA.mean,DB:dB.mean,WB:wB.mean,WA:wA.mean,mpx,sigma,refs,excluded:nEx,
-         nDark:part.modules.length,nLight:part.wmodules.length,
-         snr:Math.abs(dA.mean)/sigma,
-         cells:{DA:dA.cells,DB:dB.cells,WB:wB.cells,WA:wA.cells}};
-}
-/* 符號一致率：四層所有有效格中，符號正確（>0）的比例。
-   仿品訊號被抹除後只能亂猜 → 期望值 0.5；正品即使強度衰減大半仍接近 1。 */
-function agreement(m){
-  if(!m||!m.cells)return null;
-  // 四層一律全部分析並回報；遮罩只決定哪幾層計入總一致率與判定。
-  const act=activeLayers().map(L=>L.k);
-  let valid=0,correct=0;const per={};
-  for(const L of LAYERS){
-    const cs=m.cells[L.k]||[];
-    let v=0,c=0;
-    for(const x of cs){if(x==null||!Number.isFinite(x))continue;v++;if(x>0)c++;}
-    const counted=act.includes(L.k);
-    per[L.k]={valid:v,correct:c,rate:v?c/v:null,counted};
-    if(counted){valid+=v;correct+=c;}
-  }
-  return valid?{valid,correct,rate:correct/valid,per}:null;
-}
-/* ===== 閘門門檻 ===== */
-const GRID=4, MIN_PER_GROUP=5, MAX_CHROMA=14;   // 4x4 分格；每格每組至少 5 個模塊；色度超過 14 視為非我方模塊
-const LAYERS=[
-  {k:"DA",name:"隱碼① 深模塊 a*",defT:1.2},
-  {k:"DB",name:"隱碼② 深模塊 b*",defT:1.0},
-  {k:"WB",name:"隱碼③ 淺模塊 b*",defT:0.8},
-  {k:"WA",name:"隱碼④ 淺模塊 a*",defT:0.6},
-];
-/* 納入判定的層：正式驗證一律四層全開；只有做層組合實印實驗時才會縮減。
-   縮減後，未納入的層完全不參與符號一致率與強度統計（否則亂猜的層會拖垮判定）。 */
+/* 量測與判定（色彩數學、透視校正、measureFrame、agreement、decide 與所有門檻）
+   都在 verify-core.js；這個檔案只管畫面與流程。 */
+
+/* ===== 判定範圍 =====
+   正式驗證一律四層全判。只有層組合實印實驗才會縮減：網址帶 ?layers=1010 時，
+   這一頁只用指定的層判定，其餘層照樣量測並顯示，但不計入結果。
+   縮減只在本次載入有效，絕不寫進 localStorage——
+   早期版本把它存起來又不顯示警示，殘留一組 0000 就會讓任何真標籤都判不過，
+   外觀跟演算法失效一模一樣。這裡順手清掉那個舊的殘留值。 */
 let EVAL_MASK="1111";
-let URL_MASK=null;          // 網址帶了 ?layers= 就以它為準
-function activeLayers(){return LAYERS.filter((L,i)=>EVAL_MASK[i]==="1");}
-function syncEvalBoxes(){}     // 勾選框已移除，判定範圍改由標籤登錄或 ?layers= 決定
-/* 縮減判定層是實驗工具，刻意「不留痕跡」：
-   只在本次載入有效，重新整理就回到四層全判。
-   之前的版本把它存進 localStorage 又不顯示任何警示——殘留一組 0000 就會讓
-   任何真標籤都判不過，外觀跟演算法失效一模一樣。這裡順手清掉舊的殘留值。 */
 try{ localStorage.removeItem("evalMask"); }catch(e){}
-/* source：
-   "registry" ＝ 依標籤在品牌端登錄的防偽層自動判定（正常運作，中性提示）
-   "url"/"manual" ＝ 人為縮減判定範圍（實驗，紅色警示） */
-function setEvalMask(v,source){
-  let m=normLayerMask(v), note="", reg=(source==="registry");
+function setEvalMask(v){
+  let m=normLayerMask(v), note="";
   if(m==="0000"){            // 一條層都不判＝根本沒有驗證，退回四層才有意義
     m="1111";
-    note=reg
-      ?"這張標籤登錄為<b>未開通防偽層</b>，只有數位編號與簽章。拍攝這關本來就過不了——這是設定，不是故障。"
-      :"此組合本身不帶隱碼，已改回四層判定——<b>判不過才是正確結果</b>（對照組）。";
+    note="這張是不帶隱碼的對照組，以四層判定——<b>判不過才是正確結果</b>。";
   }
-  EVAL_MASK=m; syncEvalBoxes(); paintEvalBanner(note,reg?"info":"warn");
+  EVAL_MASK=m; paintEvalBanner(note);
 }
-/* 只要判定範圍不是四層全開，就一定顯示提示，不管來源為何 */
-function paintEvalBanner(note,kind){
+/* 只要不是單純的四層正式驗證，頁面頂端就一定有提示 */
+function paintEvalBanner(note){
   const el=$("comboTag"); if(!el)return;
   if(EVAL_MASK==="1111"&&!note){ el.style.display="none"; el.innerHTML=""; return; }
-  const on=LAYERS.filter((L,i)=>EVAL_MASK[i]==="1").map(L=>L.name).join("、")||"（無）";
-  const info=(kind==="info");
+  const on=activeLayers(EVAL_MASK).map(L=>L.name).join("、");
   el.style.display="";
-  el.style.borderColor=info?"#006e9e":"#b3261e";
-  el.style.background =info?"#eaf3f8":"#fdecea";
-  el.style.color      =info?"#123d52":"#5f1512";
-  el.innerHTML=(info
-      ?`<b>依標籤登錄判定：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
-       +(EVAL_MASK==="1111"?"":`品牌端記載這張標籤只印了 ${on}，因此<b>只用這些層判定</b>；`
-         +`其餘層仍會量測並列在下方分析中，但不計入結果。`)
-       +(note?`${EVAL_MASK==="1111"?"":"<br>"}${note}`:"")
-      :(EVAL_MASK==="1111"
-        ?`<b>⚠ 實驗網址</b><br>${note}`
-        :`<b>⚠ 實驗模式，不是正式驗證：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
-         +`這一頁只判定 ${on}，其餘層不計入，因此<b>判定結果不代表這張標籤是真品</b>。`
-         +(note?`<br>${note}`:"")))
-    +(info?"":`<br><button id="btnFullEval" style="margin-top:7px">恢復四層全判</button>`);
+  el.innerHTML=(EVAL_MASK==="1111"
+      ?`<b>⚠ 實驗網址</b><br>${note}`
+      :`<b>⚠ 實驗模式，不是正式驗證：${EVAL_MASK}　${layerMaskName(EVAL_MASK)}</b><br>`
+       +`這一頁只判定 ${on}，其餘層不計入，因此<b>判定結果不代表這張標籤是真品</b>。`
+       +`<br><button id="btnFullEval" style="margin-top:7px">恢復四層全判</button>`);
   const b=$("btnFullEval");
-  if(b)b.onclick=()=>{ setEvalMask("1111","manual"); if(lastAvg)$("btnReeval").click(); };
+  if(b)b.onclick=()=>{ setEvalMask("1111"); if(lastAvg)$("btnReeval").click(); };
 }
 function loadT(){
-  const o={};for(const L of LAYERS)o[L.k]=L.defT;
+  const o=defaultThresholds();
   try{const t=JSON.parse(localStorage.getItem("gateT")||"{}");
     for(const L of LAYERS)if(typeof t[L.k]==="number")o[L.k]=t[L.k];}catch(e){}
   return o;
 }
-const AGREE_PASS=0.85, AGREE_FAIL=0.65, AGREE_STRONG=0.95;
-// 低強度底線：符號雖是主判定，但仍要求訊號有最低可量測強度。
-// 理由①量到 0.1 Lab 級的差值已在真實拍攝雜訊之下，符號不可信；
-// 理由②純看符號會對「高保真翻印」過度寬容（對方只要保留微量正確符號即可），
-// 這道底線把那條路擋回去。實際值須由實印資料校定。
-const MAG_FLOOR=0.3;
-// 52 格全對若靠瞎猜的機率是 2^-52（約 2e-16）→ 一致率極高時本身就是壓倒性證據，
-// 不需要再要求強度達標，否則印刷偏淡的正品會被誤殺（這正是委外印刷的主要風險）。
-function decide(avg,T){
-  const ACT=activeLayers();
-  const need=Math.max(1,ACT.length-1);     // 允許一層未達門檻；四層時＝3，與原規則相同
-  let signOK=true,passCnt=0;
-  for(const L of ACT){
-    const v=avg[L.k];
-    if(!(v>0))signOK=false;
-    if(v>=T[L.k])passCnt++;
-  }
-  const ag=agreement(avg);
-  const rate=ag?ag.rate:null;
-  const mags=ACT.map(L=>Math.abs(avg[L.k])).filter(Number.isFinite).sort((a,b)=>a-b);
-  const magMed=mags.length?mags[Math.floor(mags.length/2)]:0;
-  const magOK=magMed>=MAG_FLOOR;
-  // 主判定＝符號一致率（不受強度變異影響）；強度只能把 PASS 降級為 HOLD，不能單獨造成 PASS
-  let pass,cls;
-  if(rate!=null){
-    if(rate<=AGREE_FAIL){pass=false;cls="fail";}
-    else if(rate>=AGREE_STRONG&&magOK){pass=true;cls="pass";}   // 符號證據壓倒性且過底線
-    else if(rate>=AGREE_PASS&&passCnt>=need){pass=true;cls="pass";} // 中段才需要強度佐證
-    else{pass=false;cls="hold";}
-  }else{                                   // 無分格資料時退回舊規則
-    pass=signOK&&passCnt>=need;cls=pass?"pass":(passCnt===0?"fail":"hold");
-  }
-  return{pass,cls,signOK,passCnt,nAct:ACT.length,agree:rate,agreeInfo:ag,magMed,magOK};
-}
 
 /* ===== 狀態 ===== */
-let SERIAL=null,TOKEN=null,PART=null,COUNT=null,QROBJ=null;
+let SERIAL=null,TOKEN=null,COUNT=null;
 let stream=null,loopTimer=null,samples=[],lastAvg=null,demoMode=false;
 let HASH_SERIAL=null,HASH_TOKEN=null;   // 第一次掃碼帶進來的序號（第二次拍攝時比對用）
 let DEMO_FLOW=false;                    // ?demo=flow：第 2 關允許以模擬結果完成
-const FRAMES_NEED=3, TIMEOUT_MS=20000, LOOP_MS=120;
+const TIMEOUT_MS=20000, LOOP_MS=120;
+let TEST_TAG="";                        // ?t=：實印測試版上每張標籤的代號，只用來標記量測紀錄
 
 /* ===== 畫面繪製 ===== */
 function hideAll(){
@@ -553,7 +353,7 @@ function drawLayers(avg,T,r,ok){
         <span class="th" style="left:${AGREE_FAIL*100}%"></span><span class="th" style="left:${AGREE_PASS*100}%"></span></span>
       <span class="nm" style="grid-column:1/-1;font-size:.72rem">${r.agreeInfo?r.agreeInfo.correct+"/"+r.agreeInfo.valid+" 格符號正確":""}　·　仿品期望值 50%　·　≥${AGREE_PASS*100}% 合格</span>
     </div>`;
-  const actKeys=activeLayers().map(L=>L.k);
+  const actKeys=activeLayers(EVAL_MASK).map(L=>L.k);
   $("layerRows").innerHTML=agBar+LAYERS.map(L=>{
     const v=avg?avg[L.k]:0, th=T[L.k];
     const inEval=actKeys.includes(L.k);
@@ -566,7 +366,7 @@ function drawLayers(avg,T,r,ok){
       <span class="nm">${L.name}${inEval?"":`　<small>（不計入判定）</small>`}</span>
       <span class="vl ${good?'lyOK':'lyNG'}">${Number.isFinite(v)?v.toFixed(2):"–"}</span>
       <span class="lbar ${good?'':'no'}"><i style="width:${pct}%"></i><span class="th" style="left:${thPct}%"></span></span>
-      <span class="nm" style="grid-column:1/-1;font-size:.72rem">${pTxt}　·　門檻 ${th}　·　${inEval?"計入判定":"此標籤未登錄本層，僅供參考"}</span>
+      <span class="nm" style="grid-column:1/-1;font-size:.72rem">${pTxt}　·　門檻 ${th}　·　${inEval?"計入判定":"實驗模式未納入本層，僅供參考"}</span>
     </div>`;
   }).join("");
   $("layerFoot").innerHTML=ok
@@ -581,7 +381,9 @@ function showPass(avg,T,r){
   $("banner").innerHTML=`<div class="banner ok">
     <span class="icon">✅</span>
     <h2>確認為廟方正品</h2>
-    <p>編號簽章與四條隱碼全部通過，這張標籤是廟方發放的正品標籤，非坊間仿製。</p>
+    <p>${r&&r.nAct<LAYERS.length
+        ?`編號簽章與納入判定的 ${r.nAct} 條隱碼通過（實驗模式，見頁首說明）。`
+        :"編號簽章與四條隱碼全部通過，這張標籤是廟方發放的正品標籤，非坊間仿製。"}</p>
     <p class="sn">編號 ${SERIAL} · 第 ${n} 次驗證${demoMode?" · 示範資料":""}</p>
   </div>`;
   drawLayers(avg,T,r,true);
@@ -673,7 +475,7 @@ async function startCam(){
     }
     if(!COUNT){
       COUNT=17+4*code.version;              // 直接取自 jsQR，不重新編碼 QR
-      if(!(COUNT>=21&&COUNT<=41)){COUNT=null;return;}
+      if(!(COUNT>=21&&COUNT<=177)){COUNT=null;return;}   // QR 版本 1–40
     }
     const loc=code.location, k=1/ratio;
     const corners={
@@ -684,7 +486,7 @@ async function startCam(){
     };
     const m=measureFrame(fc.getImageData(0,0,full.width,full.height),full.width,full.height,corners,COUNT,TOKEN);
     if(!m)return;
-    if(m.mpx<7){$("camStatus").textContent=`再靠近一點（每模塊 ${m.mpx.toFixed(1)} px，需 ≥7）`;return;}
+    if(m.mpx<MIN_MODULE_PX){$("camStatus").textContent=`再靠近一點（每模塊 ${m.mpx.toFixed(1)} px，需 ≥${MIN_MODULE_PX}）`;return;}
     if(![m.DA,m.DB,m.WB,m.WA].every(Number.isFinite))return;
     samples.push(m);
     $("camStatus").textContent=`量測中… ${samples.length}/${FRAMES_NEED} 幀`;
@@ -705,31 +507,62 @@ function finishCam(){
     showFail(null,T,null,`量測資料不足（只取到 ${samples.length} 幀）。請在光線充足處、鏡頭靠近標籤再試一次。`);
     return;
   }
-  const avg={};
-  for(const L of LAYERS)avg[L.k]=samples.reduce((s,m)=>s+m[L.k],0)/samples.length;
-  avg.mpx=samples.reduce((s,m)=>s+m.mpx,0)/samples.length;
-  avg.sigma=samples.reduce((s,m)=>s+(m.sigma||0),0)/samples.length;
-  avg.snr=samples.reduce((s,m)=>s+(m.snr||0),0)/samples.length;
-  // 分格值也跨幀平均後才判符號，降低單幀雜訊
-  avg.cells={};
-  for(const L of LAYERS){
-    const NC=GRID*GRID, acc=new Float64Array(NC), cnt=new Int32Array(NC);
-    for(const m of samples){
-      const cs=m.cells&&m.cells[L.k]; if(!cs)continue;
-      for(let k=0;k<NC;k++){const v=cs[k];if(v!=null&&Number.isFinite(v)){acc[k]+=v;cnt[k]++;}}
-    }
-    avg.cells[L.k]=Array.from({length:NC},(_,k)=>cnt[k]?acc[k]/cnt[k]:null);
-  }
+  const avg=averageFrames(samples);
   lastAvg=avg;
-  const r=decide(avg,T);
+  const r=decide(avg,T,EVAL_MASK);
+  logMeasurement(avg,r);
   fillDebug(avg,T,r);
   if(r.pass)showPass(avg,T,r); else showFail(avg,T,r,null);
   console.log("GATE",JSON.stringify({serial:SERIAL,frames:samples.length,avg,pass:r.pass}));
 }
 
+/* ===== 實印測試紀錄 =====
+   每次相機量測記一列，存在這台裝置的瀏覽器裡，不上傳。
+   目的是讓實印測試留下可分析的數據（尤其是 σ），而不是只有「過／不過」。 */
+const LOG_KEY="measLog/v1", LOG_MAX=500;
+function readLog(){try{const a=JSON.parse(localStorage.getItem(LOG_KEY)||"[]");return Array.isArray(a)?a:[];}catch(e){return[];}}
+function paintLogCount(){const el=$("logN");if(el)el.textContent=readLog().length;}
+function logMeasurement(avg,r){
+  const f=(v,n)=>Number.isFinite(v)?+v.toFixed(n):"";
+  const ai=r.agreeInfo, row={
+    time:new Date().toISOString(), serial:SERIAL||"", tag:TEST_TAG, kind:$("selKind").value,
+    eval_mask:EVAL_MASK, verdict:r.cls, frames:avg.frames,
+    px_per_module:f(avg.mpx,1), sigma:f(avg.sigma,3), snr:f(avg.snr,2),
+    dark_L:f(avg.darkL,1), white_L:f(avg.whiteL,1), excluded:f(avg.excluded,0),
+    agree_rate:f(r.agree,4), cells_ok:ai?ai.correct:"", cells_valid:ai?ai.valid:"",
+  };
+  LAYERS.forEach((L,i)=>{
+    const p=ai?ai.per[L.k]:null;
+    row["sep_"+(i+1)]=f(avg[L.k],3); row["ok_"+(i+1)]=p?p.correct:""; row["valid_"+(i+1)]=p?p.valid:"";
+  });
+  const log=readLog(); log.push(row);
+  try{localStorage.setItem(LOG_KEY,JSON.stringify(log.slice(-LOG_MAX)));}catch(e){}
+  paintLogCount();
+}
+$("btnLogCsv").onclick=()=>{
+  const log=readLog();
+  if(!log.length){alert("還沒有量測紀錄。用相機實際量測一張標籤後才會有。");return;}
+  const cols=Object.keys(log[0]);
+  const esc=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  const csv="\ufeff"+[cols.join(",")].concat(log.map(r=>cols.map(c=>esc(r[c])).join(","))).join("\r\n");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  a.download=`量測紀錄_${new Date().toISOString().slice(0,16).replace(/[-:]/g,"").replace("T","-")}.csv`;
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+};
+$("btnLogClear").onclick=()=>{
+  if(!confirm("清除這台裝置上的全部量測紀錄？"))return;
+  try{localStorage.removeItem(LOG_KEY);}catch(e){}
+  paintLogCount();
+};
+try{const k=sessionStorage.getItem("sampleKind");if(k)$("selKind").value=k;}catch(e){}
+$("selKind").onchange=()=>{try{sessionStorage.setItem("sampleKind",$("selKind").value);}catch(e){}};
+paintLogCount();
+
 /* ===== 除錯面板 ===== */
 function fillDebug(avg,T,r){
-  const actK=activeLayers().map(L=>L.k), ai0=r&&r.agreeInfo;
+  const actK=activeLayers(EVAL_MASK).map(L=>L.k), ai0=r&&r.agreeInfo;
   $("dbgRows").innerHTML=LAYERS.map(L=>{
     const v=avg?avg[L.k]:NaN, inEval=actK.includes(L.k), ok=inEval&&v>0&&v>=T[L.k];
     const p=ai0?ai0.per[L.k]:null;
@@ -749,14 +582,16 @@ function fillDebug(avg,T,r){
     +`符號一致率 ${r&&r.agree!=null?(r.agree*100).toFixed(1)+"%":"–"}（${ai?ai.correct+"/"+ai.valid:"–"} 格，各層 ${perTxt}）`
     +` · 強度達標 ${r?r.passCnt:0}/${nAct}`
     +(nAct<LAYERS.length?`（實驗：只判定 ${EVAL_MASK}）`:"")
-    +` · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`;
+    +` · 門檻 PASS≥${AGREE_PASS*100}% FAIL≤${AGREE_FAIL*100}%`
+    +(avg&&Number.isFinite(avg.darkL)&&Number.isFinite(avg.whiteL)?` · 黑點 L* ${avg.darkL.toFixed(1)}／白點 L* ${avg.whiteL.toFixed(1)}`:"")
+    +(TEST_TAG?` · 測試代號 ${TEST_TAG}`:"");
 }
 $("btnReeval").onclick=()=>{
   if(!lastAvg)return;
   const T={};
   document.querySelectorAll("#dbgRows input").forEach(i=>{T[i.dataset.k]=parseFloat(i.value)||0;});
   try{localStorage.setItem("gateT",JSON.stringify(T));}catch(e){}
-  const r=decide(lastAvg,T);
+  const r=decide(lastAvg,T,EVAL_MASK);
   fillDebug(lastAvg,T,r);
   if(r.pass)showPass(lastAvg,T,r);else showFail(lastAvg,T,r,null);
 };
@@ -771,11 +606,11 @@ function demoPass(){
   demoMode=true;$("demoTag").style.display="";
   const[s,t]=demoSerial();SERIAL=s;TOKEN=t;
   const T=loadT();
-  // 示範用的「正品」量測值：以設計幅度扣掉一般手機拍攝的損耗
+  // 示範用的「正品」量測值（純展示用的數字，不是任何實際標籤的量測結果）
   const avg={DA:6.8,DB:5.3,WB:4.9,WA:4.0,mpx:11.4,cells:{}};
   for(const L of LAYERS)avg.cells[L.k]=Array.from({length:GRID*GRID},()=>avg[L.k]*(0.8+0.4*0.5));
   samples=[avg];lastAvg=avg;
-  const r=decide(avg,T);fillDebug(avg,T,r);
+  const r=decide(avg,T,EVAL_MASK);fillDebug(avg,T,r);
   showPass(avg,T,r);
 }
 function demoFail(){
@@ -787,7 +622,7 @@ function demoFail(){
   let sd=12345;const rnd=()=>{sd=(sd*1103515245+12345)>>>0;return sd/4294967296;};
   for(const L of LAYERS)avg.cells[L.k]=Array.from({length:GRID*GRID},()=>(rnd()<0.5?-1:1)*0.6);
   samples=[avg];lastAvg=avg;
-  const r=decide(avg,T);fillDebug(avg,T,r);
+  const r=decide(avg,T,EVAL_MASK);fillDebug(avg,T,r);
   showFail(avg,T,r,null);
 }
 function demoSig(){
@@ -800,7 +635,7 @@ function demoSig(){
 function realMode(useHash,autoStart){
   demoMode=false;$("demoTag").style.display="none";
   if(useHash){SERIAL=HASH_SERIAL;TOKEN=HASH_TOKEN;}else{SERIAL=null;TOKEN=null;}
-  QROBJ=null;PART=null;COUNT=null;samples=[];
+  COUNT=null;samples=[];
   hideAll();
   $("scanCard").style.display="";
   $("camStatus").textContent="";
@@ -839,10 +674,12 @@ $("btnCheck").onclick=()=>{
 };
 (function boot(){
   const q=new URLSearchParams(location.search);
-  // ?layers=1010 → 這一頁只判定指定的層（層組合實印實驗用）。
-  // 只作用於本次載入，不覆寫校定面板存在 localStorage 的預設值。
+  // ?layers=1010 → 這一頁只判定指定的層（層組合實印實驗用），只作用於本次載入。
+  // ?t=A07 → 實印測試版上那張標籤的代號，只用來標記量測紀錄。
   const ql=q.get("layers");
-  if(ql!=null){ URL_MASK=ql; setEvalMask(ql,"url"); }
+  if(ql!=null)setEvalMask(ql);
+  TEST_TAG=(q.get("t")||"").replace(/[^0-9A-Za-z_.-]/g,"").slice(0,16);
+  if(ql!=null||TEST_TAG)$("dbgBox").open=true;      // 實印測試時直接攤開量測明細
   const d=q.get("demo");
   const m=parseLabelCode(location.hash);
   if(m){

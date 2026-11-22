@@ -312,7 +312,7 @@
     </div>
     <p class="hint" style="margin-top:12px">
       <b>防偽層</b>＝這批標籤送印時要加上哪幾層防偽訊號，四層可以分別開關。
-      驗證端會依這裡的登錄<b>自動判定該張標籤該有哪幾層</b>——沒開的層不列入判定，但仍會量測並顯示分析數據。
+      正式系統裡，驗證伺服器會依這裡的登錄判定該張標籤<b>該有哪幾層</b>——沒開的層不列入判定，但仍會量測並留下分析數據。
       四層全不開通者只有數位序號與簽章：掃碼查得到、簽章有效，但拍攝那關會判不過，
       實務上用在贈品、內部樣品這類不需要防偽的批次。
     </p>
@@ -421,8 +421,8 @@
           當場<b>改編號一個字元</b> → <b>編號無效</b>。</li>
       <li><b>翻拍翻印會失效</b>（生成端，最有說服力）　在筆電開
           <span class="mono">生成器_單檔版.html</span>，切換三種翻印通道，
-          畫面直接跑出正品與仿品的四層殘留率：影印機 96%↔17%、噴墨重印 96%↔36%、
-          高階設備 96%↔55%，判定 PASS ↔ FAIL。<b>這是真的在算，不是預錄畫面。</b></li>
+          畫面直接跑出正品與仿品各自的符號一致率與判定（正品 PASS、仿品 FAIL），
+          用的就是手機驗證頁的同一套判定程式。<b>這是真的在算，不是預錄畫面。</b></li>
       <li><b>驗證頁長什麼樣</b>　用示範網址直接看兩種結果：
           <span class="mono">?demo=pass</span>（通過）與 <span class="mono">?demo=fail</span>（未通過）。</li>
       <li><b>有實體標籤的話</b>　拿印出來的標籤用相機實測；把它影印一份再拍，對照著看。</li>
@@ -444,6 +444,7 @@
 <script src="qrlib.js"></script>
 <script src="jsqr.js"></script>
 <script src="crypto.js"></script>
+<script src="layers.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -458,10 +459,9 @@ function defaultBase(){
 }
 
 /* ===== 示範資料 ===== */
-const ITEMS = ["錢母","金雞","平安符","開運手鍊","限量紀念幣"];
-const PLACES = ["台北 · 中山","台中 · 西屯","高雄 · 左營","新竹 · 東區","台南 · 中西","桃園 · 中壢","線上通路"];
-const LN = "①②③④";
-const LDESC = ["深模塊 a*","深模塊 b*","淺模塊 b*","淺模塊 a*"];
+/* 四條層的編號與載體定義在 layers.js（生成端、驗證端共用）；這裡只多一組給品牌端看的說法 */
+const LN = LAYER_DEFS.map(L=>L.no).join("");
+const LDESC = LAYER_DEFS.map(L=>`${L.carrier}模塊 ${L.axis}`);
 const MASK_STD = {"1111":"四層全開","1100":"僅深色層","0011":"僅淺色層","0000":"未開通"};
 function normMask(v){
   if(typeof v === "string" && /^[01]{4}$/.test(v)) return v;
@@ -675,7 +675,7 @@ function paintStatus(){
   const on = lastBatch.every(L => (DB.labels.find(x=>x.uid===L.uid)||L).status === "active");
   $("oStatus").innerHTML = on
     ? `<span class="pill on">已啟用</span>`
-    : `<span class="pill off">未啟用</span>　<span class="hint">掃碼會被擋下</span>`;
+    : `<span class="pill off">未啟用</span>　<span class="hint">正式系統中，未啟用的碼掃了會被擋下</span>`;
   $("btnActivate").textContent = on
     ? (lastBatch.length>1 ? "停用這一批" : "停用")
     : (lastBatch.length>1 ? "啟用這一批" : "啟用");
@@ -760,7 +760,6 @@ function render(){
   sel.innerHTML = `<option value="">全部品項</option>` + items.map(i=>`<option${i===cur?" selected":""}>${i}</option>`).join("");
 
   // 列
-  const base = $("fBase").value.trim() || defaultBase();
   const rows = filtered();
   $("rows").innerHTML = rows.length ? rows.map(L=>{
     const st = STATUS[L.status], last = L.last;
@@ -800,8 +799,6 @@ function render(){
       </div>`).join("")
     : `<div class="ok-note">目前沒有重號或異常密集驗證的紀錄。</div>`;
 
-  // 網址欄更新後，QR 內容也要跟上
-  void base;
 }
 
 /* ===== 互動 ===== */
